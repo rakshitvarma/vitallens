@@ -67,7 +67,8 @@ Respond with ONLY valid JSON, no markdown, matching exactly this schema:
 {{
   "items": [
     {{"name": str, "portion": str, "calories": number, "protein_g": number,
-      "carbs_g": number, "fat_g": number, "sugar_g": number, "sodium_mg": number}}
+      "carbs_g": number, "fat_g": number, "sugar_g": number, "fiber_g": number,
+      "sodium_mg": number, "salt_g": number}}
   ],
   "meal_guess": str,          // e.g. "lunch"
   "confidence": number,       // 0-1 overall
@@ -88,10 +89,15 @@ def analyze_meal_image(image_bytes: bytes, mime_type: str, portion_note: str) ->
     )
     data = json.loads(resp.text)
     items = data.get("items", [])
+    for item in items:
+        if not item.get("salt_g") and item.get("sodium_mg"):
+            item["salt_g"] = round(float(item.get("sodium_mg") or 0) * 2.5 / 1000, 2)
     data["totals"] = {
         k: round(sum(float(i.get(k) or 0) for i in items), 1)
-        for k in ("calories", "protein_g", "carbs_g", "fat_g", "sugar_g", "sodium_mg")
+        for k in ("calories", "protein_g", "carbs_g", "fat_g", "sugar_g", "fiber_g", "sodium_mg", "salt_g")
     }
+    data["totals"]["sodium_mg"] = round(data["totals"]["sodium_mg"])
+    data["totals"]["salt_g"] = round(data["totals"]["salt_g"], 2)
     return data
 
 
@@ -114,7 +120,7 @@ def chat(message: str, score_data: dict, meals: list, activities: list, history:
     context = {
         "score": score_data,
         "recent_meals": [
-            {k: m.get(k) for k in ("date", "items_summary", "calories", "sugar_g", "sodium_mg", "protein_g")}
+            {k: m.get(k) for k in ("date", "meal_guess", "items_summary", "portion_note", "calories", "protein_g", "carbs_g", "fat_g", "sugar_g", "fiber_g", "sodium_mg", "salt_g")}
             for m in meals[-15:]
         ],
         "recent_activities": [

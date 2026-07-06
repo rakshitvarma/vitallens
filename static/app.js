@@ -131,6 +131,18 @@ const setMealFile=file=>{
   $("dropText").hidden=true;
 };
 
+const resetMealUpload=()=>{
+  selectedMealFile=null;
+  mealImage.value="";
+  if(previewUrl)URL.revokeObjectURL(previewUrl);
+  previewUrl=null;
+  $("preview").src="";
+  $("preview").hidden=true;
+  $("dropText").hidden=false;
+  drop.classList.remove("has-file");
+  $("portionNote").value="";
+};
+
 const loadImage=file=>new Promise((resolve,reject)=>{
   const img=new Image();
   const url=URL.createObjectURL(file);
@@ -173,14 +185,103 @@ $("btnAnalyze").addEventListener("click",async()=>{
   }catch(e){toast("Analysis failed: "+e.message);}
   b.disabled=false;b.textContent="Analyze with Gemini";
 });
+
+const nutritionFields=[
+  ["calories","kcal","Calories",0],
+  ["protein_g","g","Protein",1],
+  ["carbs_g","g","Carbs",1],
+  ["fat_g","g","Fat",1],
+  ["sugar_g","g","Sugar",1],
+  ["fiber_g","g","Fiber",1],
+  ["sodium_mg","mg","Sodium",0],
+  ["salt_g","g","Salt",2],
+];
+
+const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[ch]));
+const numberValue=(obj,key)=>{
+  if(key==="salt_g"&&!(obj?.salt_g)&&obj?.sodium_mg)return Number(obj.sodium_mg)*2.5/1000;
+  return Number(obj?.[key]||0);
+};
+const fmtNutrition=(obj,key,digits=1)=>{
+  const value=numberValue(obj,key);
+  return digits===0?Math.round(value):value.toFixed(digits).replace(/\.0$/,"");
+};
+const nutritionGrid=obj=>nutritionFields.map(([key,unit,label,digits])=>`
+  <div class="nutrition-chip">
+    <b>${fmtNutrition(obj,key,digits)}${unit}</b>
+    <span>${label}</span>
+  </div>
+`).join("");
+
 function renderAnalysis(a){
   $("analysisResult").hidden=false;$("confTag").textContent=`confidence ${Math.round((a.confidence||0)*100)}%`;
-  const cols=["calories","protein_g","carbs_g","fat_g","sugar_g","sodium_mg"];
-  $("itemsTable").innerHTML=`<tr><th>Item</th><th>Portion</th>${cols.map(c=>`<th>${c.replace("_g","(g)").replace("_mg","(mg)")}</th>`).join("")}</tr>`+a.items.map(i=>`<tr><td>${i.name}</td><td>${i.portion||""}</td>${cols.map(c=>`<td>${Math.round(i[c]||0)}</td>`).join("")}</tr>`).join("")+`<tr class="total"><td>Total</td><td></td>${cols.map(c=>`<td>${Math.round(a.totals[c]||0)}</td>`).join("")}</tr>`;
-  $("healthNotes").innerHTML=(a.health_notes||[]).map(n=>`<p>${n}</p>`).join("");
+  const cols=nutritionFields;
+  $("itemsTable").innerHTML=`<tr><th>Item</th><th>Serving</th>${cols.map(([,unit,label])=>`<th>${label}${unit==="kcal"?"":" ("+unit+")"}</th>`).join("")}</tr>`+
+    (a.items||[]).map(i=>`<tr><td>${escapeHtml(i.name)}</td><td>${escapeHtml(i.portion||"Estimated serving")}</td>${cols.map(([key,_unit,_label,digits])=>`<td>${fmtNutrition(i,key,digits)}</td>`).join("")}</tr>`).join("")+
+    `<tr class="total"><td>Total</td><td></td>${cols.map(([key,_unit,_label,digits])=>`<td>${fmtNutrition(a.totals||{},key,digits)}</td>`).join("")}</tr>`;
+  $("healthNotes").innerHTML=(a.health_notes||[]).map(n=>`<p>${escapeHtml(n)}</p>`).join("");
 }
-$("btnSaveMeal").addEventListener("click",async()=>{if(!lastAnalysis)return;await api("/api/meals",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({meal_guess:lastAnalysis.meal_guess,items:lastAnalysis.items,...lastAnalysis.totals})});toast("Meal saved");$("analysisResult").hidden=true;loadMeals();});
-async function loadMeals(){const m=await api("/api/meals?days=7");$("mealList").innerHTML=m.slice(-12).reverse().map(m=>`<div class="rowitem"><div><b>${m.items_summary||m.meal_guess}</b><div class="meta">${m.date}</div></div><div>${Math.round(m.calories)} kcal</div></div>`).join("")||"<p class='sub'>No meals logged yet.</p>";}
+$("btnSaveMeal").addEventListener("click",async()=>{
+  if(!lastAnalysis)return;
+  const body={
+    meal_guess:lastAnalysis.meal_guess||"meal",
+    portion_note:$("portionNote").value.trim(),
+    source:"photo",
+    confidence:Number(lastAnalysis.confidence||0),
+    health_notes:lastAnalysis.health_notes||[],
+    items:lastAnalysis.items||[],
+    ...(lastAnalysis.totals||{}),
+  };
+  await api("/api/meals",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  toast("Meal saved to recent meals");
+  $("analysisResult").hidden=true;
+  lastAnalysis=null;
+  resetMealUpload();
+  await loadMeals();
+  loadDashboard();
+  $("mealList").scrollIntoView({behavior:"smooth",block:"start"});
+});
+
+const renderMealItem=item=>`
+  <div class="meal-log-item">
+    <div>
+      <b>${escapeHtml(item.name||"Food item")}</b>
+      <span>${escapeHtml(item.portion||"Estimated serving")}</span>
+    </div>
+    <div class="meal-item-nutrients">
+      <span>${fmtNutrition(item,"calories",0)} kcal</span>
+      <span>${fmtNutrition(item,"carbs_g",1)}g carbs</span>
+      <span>${fmtNutrition(item,"protein_g",1)}g protein</span>
+      <span>${fmtNutrition(item,"fiber_g",1)}g fiber</span>
+    </div>
+  </div>
+`;
+
+const renderMealLog=meal=>{
+  const title=meal.items_summary||meal.meal_guess||"Logged meal";
+  const confidence=meal.confidence?` - ${Math.round(meal.confidence*100)}% confidence`:"";
+  const notes=(meal.health_notes||[]).map(n=>`<li>${escapeHtml(n)}</li>`).join("");
+  return `
+    <article class="meal-log">
+      <div class="meal-log-head">
+        <div>
+          <h4>${escapeHtml(title)}</h4>
+          <p>${escapeHtml(meal.date||"")} - ${escapeHtml(meal.meal_guess||"meal")}${confidence}</p>
+        </div>
+        <strong>${fmtNutrition(meal,"calories",0)} kcal</strong>
+      </div>
+      ${meal.portion_note?`<p class="portion-note">Portion note: ${escapeHtml(meal.portion_note)}</p>`:""}
+      <div class="nutrition-grid">${nutritionGrid(meal)}</div>
+      <div class="meal-log-items">${(meal.items||[]).map(renderMealItem).join("")}</div>
+      ${notes?`<ul class="meal-log-notes">${notes}</ul>`:""}
+    </article>
+  `;
+};
+
+async function loadMeals(){
+  const meals=await api("/api/meals?days=7");
+  $("mealList").innerHTML=meals.slice(-12).reverse().map(renderMealLog).join("")||"<p class='sub'>No meals logged yet.</p>";
+}
 
 $("btnSaveAct").addEventListener("click",async()=>{await api("/api/activities",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:$("actType").value,minutes:+$("actMin").value,intensity:$("actIntensity").value})});toast("Activity added");loadActivities();});
 async function loadActivities(){const a=await api("/api/activities?days=7");$("actList").innerHTML=a.slice(-14).reverse().map(a=>`<div class="rowitem"><div><b style="text-transform:capitalize">${a.type}</b><div class="meta">${a.date} - ${a.source}</div></div><div>${a.minutes} min</div></div>`).join("")||"<p class='sub'>Nothing logged.</p>";}

@@ -298,13 +298,104 @@ input:hover,select:hover{border-color:#c3d4c9}
 .drop span{color:var(--muted);font-weight:800;text-align:center;padding:18px}
 
 #analysisResult{margin-top:18px;overflow-x:auto}
-.ntable{width:100%;min-width:640px;border-collapse:collapse;margin:10px 0 14px;font-size:.88rem}
+.ntable{width:100%;min-width:860px;border-collapse:collapse;margin:10px 0 14px;font-size:.88rem}
 .ntable th{text-align:left;color:var(--muted);font-weight:800;padding:8px;border-bottom:1.5px solid var(--line)}
 .ntable td{padding:8px;border-bottom:1px solid var(--line)}
 .ntable tr.total td{font-weight:800;border-bottom:none;background:#edf7d6}
 .notes{margin-bottom:14px}
 .notes p{font-size:.9rem;color:var(--muted);padding-left:14px;position:relative;margin-bottom:6px}
 .notes p::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;border-radius:50%;background:var(--lime-2)}
+
+.nutrition-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(90px,1fr));
+  gap:8px;
+  margin:12px 0;
+}
+.nutrition-chip{
+  background:var(--surface-soft);
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:9px 10px;
+  min-width:0;
+}
+.nutrition-chip b{
+  display:block;
+  color:var(--pine);
+  font-family:'Sora',system-ui,sans-serif;
+  font-size:.96rem;
+  line-height:1.15;
+}
+.nutrition-chip span{
+  display:block;
+  color:var(--muted);
+  font-size:.73rem;
+  font-weight:800;
+  margin-top:2px;
+}
+.meal-log{
+  border-top:1px solid var(--line);
+  padding:16px 0;
+}
+.meal-log:first-child{border-top:none;padding-top:2px}
+.meal-log-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+}
+.meal-log-head h4{
+  font-family:'Sora',system-ui,sans-serif;
+  font-size:1rem;
+  line-height:1.25;
+  margin-bottom:3px;
+}
+.meal-log-head p,.portion-note{
+  color:var(--muted);
+  font-size:.84rem;
+  font-weight:700;
+}
+.meal-log-head strong{
+  color:var(--pine);
+  white-space:nowrap;
+  font-family:'Sora',system-ui,sans-serif;
+}
+.portion-note{margin-top:8px}
+.meal-log-items{
+  display:grid;
+  gap:8px;
+  margin-top:10px;
+}
+.meal-log-item{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:12px;
+  align-items:start;
+  padding:10px 0;
+  border-top:1px dashed var(--line);
+}
+.meal-log-item b{display:block;font-size:.92rem}
+.meal-log-item span{color:var(--muted);font-size:.8rem}
+.meal-item-nutrients{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+  gap:5px;
+  max-width:310px;
+}
+.meal-item-nutrients span{
+  background:#edf7d6;
+  color:var(--pine);
+  border-radius:8px;
+  padding:3px 7px;
+  font-size:.72rem;
+  font-weight:800;
+}
+.meal-log-notes{
+  margin:10px 0 0 18px;
+  color:var(--muted);
+  font-size:.84rem;
+}
 
 .rowitem{
   display:flex;
@@ -457,6 +548,10 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:22px 18px 86
   .meal-form{gap:10px}
   .drop{min-height:176px}
   .ntable{font-size:.82rem}
+  .nutrition-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .meal-log-head{flex-direction:column;gap:4px}
+  .meal-log-item{grid-template-columns:1fr}
+  .meal-item-nutrients{justify-content:flex-start;max-width:none}
   .rowitem{align-items:flex-start}
   .chat-log{min-height:260px;max-height:56vh;padding:10px}
   .chat-input{grid-template-columns:1fr}

@@ -5,7 +5,7 @@ import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app import gemini_client, scoring, storage
 from app.auth import (
     AUTH_CONFIG_ERROR,
@@ -75,11 +75,16 @@ async def analyze_meal(image: UploadFile=File(...), portion_note: str=Form(""), 
         raise HTTPException(503, gemini_client.user_facing_error(e)) from e
 
 class MealIn(BaseModel):
-    date: str|None=None; meal_guess: str="meal"; items: list[dict]=[]; calories: float=0; protein_g: float=0; carbs_g: float=0; fat_g: float=0; sugar_g: float=0; sodium_mg: float=0
+    date: str|None=None; meal_guess: str="meal"; portion_note: str=""; source: str="manual"; confidence: float=0; health_notes: list[str]=Field(default_factory=list); items: list[dict]=Field(default_factory=list); calories: float=0; protein_g: float=0; carbs_g: float=0; fat_g: float=0; sugar_g: float=0; fiber_g: float=0; sodium_mg: float=0; salt_g: float=0
 
 @app.post("/api/meals")
 def save_meal(meal: MealIn, user_id: str=Depends(get_user_id)):
     doc=meal.model_dump(); doc["date"]=doc["date"] or datetime.now(timezone.utc).date().isoformat()
+    if not doc.get("salt_g") and doc.get("sodium_mg"):
+        doc["salt_g"]=round(float(doc.get("sodium_mg") or 0)*2.5/1000,2)
+    for item in doc.get("items", []):
+        if not item.get("salt_g") and item.get("sodium_mg"):
+            item["salt_g"]=round(float(item.get("sodium_mg") or 0)*2.5/1000,2)
     doc["user_id"]=user_id; doc["items_summary"]=", ".join(i.get("name","?") for i in doc["items"])[:200]
     return {"id": storage.save_doc("meals", doc)}
 
@@ -287,13 +292,14 @@ def community():
 
 @app.post("/api/demo/seed")
 def demo_seed(user_id: str=Depends(get_user_id)):
-    rng=random.Random(); menu=[("Aloo paratha + curd",520,12,68,22,8,780),("Dal tadka + jeera rice",640,22,92,18,6,1150),("Chicken biryani",780,34,96,28,9,1450),("Rajma chawal",560,19,88,12,7,980),("Masala dosa",480,11,74,16,10,1120),("Paneer butter masala",820,26,72,46,14,1380),("Chole bhature",760,18,94,34,11,1350)]
+    rng=random.Random(); menu=[("Aloo paratha + curd",520,12,68,22,8,7,780),("Dal tadka + jeera rice",640,22,92,18,6,12,1150),("Chicken biryani",780,34,96,28,9,5,1450),("Rajma chawal",560,19,88,12,7,13,980),("Masala dosa",480,11,74,16,10,5,1120),("Paneer butter masala",820,26,72,46,14,4,1380),("Chole bhature",760,18,94,34,11,10,1350)]
     today=datetime.now(timezone.utc).date()
     for d in range(7):
         day=(today-timedelta(days=d)).isoformat()
         for _ in range(rng.randint(2,3)):
-            name,cal,p,c,f,s,na=rng.choice(menu)
-            storage.save_doc("meals",{"user_id":user_id,"date":day,"meal_guess":"meal","items":[{"name":name}],"items_summary":name,"calories":cal*rng.uniform(0.85,1.15),"protein_g":p,"carbs_g":c,"fat_g":f,"sugar_g":s*rng.uniform(0.8,1.4),"sodium_mg":na*rng.uniform(0.85,1.25)})
+            name,cal,p,c,f,s,fi,na=rng.choice(menu)
+            sodium=na*rng.uniform(0.85,1.25)
+            storage.save_doc("meals",{"user_id":user_id,"date":day,"meal_guess":"meal","items":[{"name":name,"portion":"1 serving","calories":cal,"protein_g":p,"carbs_g":c,"fat_g":f,"sugar_g":s,"fiber_g":fi,"sodium_mg":na,"salt_g":round(na*2.5/1000,2)}],"items_summary":name,"calories":cal*rng.uniform(0.85,1.15),"protein_g":p,"carbs_g":c,"fat_g":f,"sugar_g":s*rng.uniform(0.8,1.4),"fiber_g":fi,"sodium_mg":sodium,"salt_g":round(sodium*2.5/1000,2),"health_notes":["Demo estimate based on typical Indian serving sizes."]})
         if rng.random()<0.6:
             storage.save_doc("activities",{"user_id":user_id,"date":day,"type":rng.choice(["walk","run","cycling","yoga"]),"minutes":rng.choice([20,30,45]),"intensity":rng.choice(["moderate","moderate","high"]),"source":"demo"})
     return {"ok":True}
