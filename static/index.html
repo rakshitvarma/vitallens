@@ -34,14 +34,28 @@
 </header>
 <main>
 <section id="tab-dashboard" class="tab active">
+  <div class="dashboard-tools">
+    <div>
+      <span class="eyebrow">Analytics period</span>
+      <h2 id="periodLabel">This week</h2>
+    </div>
+    <div class="period-controls" aria-label="Dashboard period controls">
+      <button class="icon-btn" id="prevPeriod" aria-label="Previous period">&lsaquo;</button>
+      <div class="segmented" role="group" aria-label="Period">
+        <button id="periodWeek" class="active" data-period="week">Week</button>
+        <button id="periodMonth" data-period="month">Month</button>
+      </div>
+      <button class="icon-btn" id="nextPeriod" aria-label="Next period">&rsaquo;</button>
+    </div>
+  </div>
   <div class="hero">
     <div class="ring-wrap">
       <svg viewBox="0 0 200 200" class="ring"><circle cx="100" cy="100" r="86" class="ring-bg"/><circle cx="100" cy="100" r="86" class="ring-fg" id="ringFg"/></svg>
       <div class="ring-center"><div class="score" id="scoreNum">-</div><div class="band" id="scoreBand">VitalScore</div></div>
     </div>
     <div class="hero-side">
-      <h1>Your week, decoded.</h1>
-      <p class="sub">Meals, movement and risk signals - analyzed by Gemini, scored transparently against WHO guidance.</p>
+      <h1 id="dashboardTitle">Your week, decoded.</h1>
+      <p class="sub" id="dashboardSub">Meals, movement and risk signals - analyzed by Gemini, scored transparently against WHO guidance.</p>
       <div class="stat-row" id="weeklyStats"></div>
       <div class="hero-actions">
         <button class="btn primary" id="btnInsight">Generate AI weekly insight</button>
@@ -49,14 +63,58 @@
       </div>
     </div>
   </div>
+  <div class="card targets-card">
+    <div class="card-head">
+      <div>
+        <h3>Personal targets <span class="tag">editable</span></h3>
+        <p class="sub compact">Set daily food goals and weekly movement goals used by the dashboard.</p>
+      </div>
+      <button class="btn primary small" id="btnSaveTargets">Save targets</button>
+    </div>
+    <div class="targets-grid" id="targetsForm">
+      <label>Daily calories <input type="number" id="targetCalories" min="0" step="50"/></label>
+      <label>Sugar max (g/day) <input type="number" id="targetSugar" min="0" step="1"/></label>
+      <label>Sodium max (mg/day) <input type="number" id="targetSodium" min="0" step="50"/></label>
+      <label>Protein (g/day) <input type="number" id="targetProtein" min="0" step="1"/></label>
+      <label>Fiber (g/day) <input type="number" id="targetFiber" min="0" step="1"/></label>
+      <label>Active min/week <input type="number" id="targetActive" min="0" step="10"/></label>
+      <label>Steps/day <input type="number" id="targetSteps" min="0" step="500"/></label>
+      <label>Burn/week <input type="number" id="targetBurn" min="0" step="50"/></label>
+    </div>
+  </div>
+  <div class="grid2 intelligence-grid">
+    <div class="card intel-card">
+      <h3>Food intelligence <span class="tag">intake</span></h3>
+      <div class="metric-grid" id="foodMetrics"></div>
+      <div id="foodBalance" class="balance-list"></div>
+      <div id="topFoods" class="mini-list"></div>
+    </div>
+    <div class="card intel-card">
+      <h3>Movement intelligence <span class="tag">activity</span></h3>
+      <div class="metric-grid" id="movementMetrics"></div>
+      <div id="movementBalance" class="balance-list"></div>
+      <div id="movementBreakdown" class="mini-list"></div>
+    </div>
+  </div>
   <div class="grid2">
     <div class="card"><h3>Risk signals <span class="tag">explainable</span></h3><div id="signals"></div></div>
     <div class="card"><h3>Score breakdown</h3><div id="components"></div></div>
   </div>
-  <div class="card"><h3>7-day trend - calories vs active minutes</h3><canvas id="trendChart" height="90"></canvas></div>
+  <div class="card">
+    <h3>Period comparison</h3>
+    <div id="comparisonRows" class="comparison-grid"></div>
+  </div>
+  <div class="card"><h3 id="trendTitle">Trend - calories vs active minutes</h3><canvas id="trendChart" height="96"></canvas></div>
+  <div class="card"><h3>Day log</h3><div id="dayLog" class="day-log"></div></div>
   <div class="card insight-card" id="insightCard" hidden><h3>Gemini weekly insight</h3><p id="insightText"></p></div>
 </section>
 <section id="tab-meal" class="tab">
+  <div class="card page-dashboard">
+    <h2>Food target dashboard</h2>
+    <p class="sub">Selected-period nutrition progress updates from your logged meals.</p>
+    <div class="metric-grid" id="mealFocusMetrics"></div>
+    <div class="balance-list" id="mealFocusBalance"></div>
+  </div>
   <div class="card">
     <h2>Snap it. We'll count it.</h2>
     <p class="sub">Upload a photo of your plate. Gemini identifies each dish and returns full nutrition.</p>
@@ -79,13 +137,28 @@
   <div class="card"><h3>Recent meals</h3><div id="mealList"></div></div>
 </section>
 <section id="tab-activity" class="tab">
+  <div class="card page-dashboard">
+    <h2>Activity target dashboard</h2>
+    <p class="sub">Selected-period movement progress updates from manual logs and Strava syncs.</p>
+    <div class="metric-grid" id="activityFocusMetrics"></div>
+    <div class="balance-list" id="activityFocusBalance"></div>
+  </div>
   <div class="grid2">
     <div class="card">
       <h2>Log activity</h2>
       <div class="form-col">
+        <input type="text" id="actName" placeholder="Workout name, e.g. Morning run"/>
         <select id="actType"><option value="walk">Walk</option><option value="run">Run</option><option value="cycling">Cycling</option><option value="yoga">Yoga</option><option value="gym">Gym</option><option value="sport">Sport</option></select>
         <input type="number" id="actMin" value="30" min="5" max="600"/>
         <select id="actIntensity"><option value="moderate">Moderate</option><option value="high">High intensity</option></select>
+        <div class="form-grid">
+          <input type="number" id="actCalories" min="0" placeholder="Calories burned"/>
+          <input type="number" id="actDistance" min="0" step="0.1" placeholder="Distance km"/>
+          <input type="number" id="actSteps" min="0" step="100" placeholder="Steps"/>
+          <input type="number" id="actHr" min="0" placeholder="Avg HR"/>
+          <input type="number" id="actMaxHr" min="0" placeholder="Max HR"/>
+        </div>
+        <input type="text" id="actNotes" placeholder="Notes, optional"/>
         <button class="btn primary" id="btnSaveAct">Add activity</button>
       </div>
     </div>

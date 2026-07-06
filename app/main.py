@@ -1,11 +1,13 @@
-import base64, hashlib, hmac, json, os, random, statistics
-from datetime import datetime, timedelta, timezone
+import base64, calendar, hashlib, hmac, json, os, random, statistics
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
+
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
 from app import gemini_client, scoring, storage
 from app.auth import (
     AUTH_CONFIG_ERROR,
@@ -22,13 +24,277 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8080")
 STRAVA_SCOPE = "activity:read_all"
 MAX_IMAGE_BYTES = 8_000_000
 
+NUTRIENTS = ("calories", "protein_g", "carbs_g", "fat_g", "sugar_g", "fiber_g", "sodium_mg", "salt_g")
+DEFAULT_USER_TARGETS = {
+    **scoring.TARGETS,
+    "fiber_g_per_day": 25,
+    "steps_per_day": 8000,
+    "calories_burned_per_week": 1200,
+    "distance_m_per_week": 15000,
+}
+
+
+def _float(value, default: float = 0) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return default
+
+
+def _round(value, digits: int = 1):
+    rounded = round(_float(value), digits)
+    return int(rounded) if digits == 0 else rounded
+
+
+def _as_date(value) -> date | None:
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)[:10]).date()
+    except ValueError:
+        return None
+
+
+def _iso(d: date) -> str:
+    return d.isoformat()
+
+
+def _period_bounds(period: str, anchor: str | None) -> tuple[str, date, date]:
+    mode = "month" if period == "month" else "week"
+    base = _as_date(anchor) or datetime.now(timezone.utc).date()
+    if mode == "month":
+        start = base.replace(day=1)
+        end = base.replace(day=calendar.monthrange(base.year, base.month)[1])
+    else:
+        start = base - timedelta(days=base.weekday())
+        end = start + timedelta(days=6)
+    return mode, start, end
+
+
+def _previous_bounds(period: str, start: date, end: date) -> tuple[date, date]:
+    if period == "month":
+        previous_end = start - timedelta(days=1)
+        previous_start = previous_end.replace(day=1)
+        return previous_start, previous_end
+    previous_end = start - timedelta(days=1)
+    return previous_end - timedelta(days=6), previous_end
+
+
+def _previous_month_bounds(anchor_start: date) -> tuple[date, date]:
+    previous_end = anchor_start.replace(day=1) - timedelta(days=1)
+    return previous_end.replace(day=1), previous_end
+
+
+def _filter_range(docs: list[dict], start: date, end: date) -> list[dict]:
+    return [d for d in docs if (doc_date := _as_date(d.get("date", d.get("created_at")))) and start <= doc_date <= end]
+
+
+def _date_list(start: date, end: date) -> list[date]:
+    return [start + timedelta(days=i) for i in range(max((end - start).days + 1, 0))]
+
+
+def _normalize_meal_doc(doc: dict) -> dict:
+    doc = dict(doc)
+    doc["date"] = doc.get("date") or datetime.now(timezone.utc).date().isoformat()
+    for key in NUTRIENTS:
+        doc[key] = _float(doc.get(key))
+    if not doc.get("salt_g") and doc.get("sodium_mg"):
+        doc["salt_g"] = round(_float(doc.get("sodium_mg")) * 2.5 / 1000, 2)
+    items = []
+    for item in doc.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        clean = dict(item)
+        clean["name"] = str(clean.get("name") or "Food item").strip() or "Food item"
+        clean["portion"] = str(clean.get("portion") or "Estimated serving").strip() or "Estimated serving"
+        for key in NUTRIENTS:
+            clean[key] = _float(clean.get(key))
+        if not clean.get("salt_g") and clean.get("sodium_mg"):
+            clean["salt_g"] = round(_float(clean.get("sodium_mg")) * 2.5 / 1000, 2)
+        items.append(clean)
+    doc["items"] = items
+    doc["items_summary"] = ", ".join(i.get("name", "?") for i in items)[:200]
+    return doc
+
+
+def _normalize_activity_doc(doc: dict) -> dict:
+    doc = dict(doc)
+    doc["date"] = doc.get("date") or datetime.now(timezone.utc).date().isoformat()
+    doc["type"] = str(doc.get("type") or "workout").replace("_", " ").lower()
+    doc["minutes"] = _round(doc.get("minutes", 0), 1)
+    doc["elapsed_minutes"] = _round(doc.get("elapsed_minutes") or doc.get("minutes") or 0, 1)
+    doc["intensity"] = doc.get("intensity") or "moderate"
+    doc["source"] = doc.get("source") or "manual"
+    for key in ("distance_m", "calories_burned", "average_heartrate", "max_heartrate", "elevation_gain_m", "average_speed_mps", "max_speed_mps", "steps"):
+        if doc.get(key) in ("", None):
+            doc[key] = None
+        elif doc.get(key) is not None:
+            doc[key] = _float(doc.get(key))
+    return doc
+
+
+def _sum(docs: list[dict], key: str) -> float:
+    return sum(_float(d.get(key)) for d in docs)
+
+
+def _avg(values: list[float]) -> float | None:
+    values = [v for v in values if v]
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def _food_summary(meals: list[dict], days: int) -> dict:
+    totals = {key: _round(_sum(meals, key), 0 if key in ("calories", "sodium_mg") else 1) for key in NUTRIENTS}
+    daily = {key: _round(totals[key] / max(days, 1), 0 if key in ("calories", "sodium_mg") else 1) for key in NUTRIENTS}
+    foods: dict[str, dict] = {}
+    for meal in meals:
+        for item in meal.get("items") or []:
+            name = str(item.get("name") or "Food item")
+            entry = foods.setdefault(name, {"name": name, "count": 0, "calories": 0})
+            entry["count"] += 1
+            entry["calories"] += _float(item.get("calories"))
+    top_foods = sorted(foods.values(), key=lambda x: (x["count"], x["calories"]), reverse=True)[:5]
+    recent = [{
+        "date": meal.get("date", ""),
+        "meal_guess": meal.get("meal_guess", "meal"),
+        "items_summary": meal.get("items_summary") or ", ".join(i.get("name", "?") for i in meal.get("items", [])),
+        "calories": round(_float(meal.get("calories"))),
+    } for meal in sorted(meals, key=lambda m: str(m.get("date", "")), reverse=True)[:5]]
+    return {
+        "totals": totals,
+        "daily_avg": daily,
+        "meal_count": len(meals),
+        "days_logged": len({str(m.get("date", ""))[:10] for m in meals}),
+        "top_foods": top_foods,
+        "recent": recent,
+    }
+
+
+def _movement_summary(activities: list[dict]) -> dict:
+    type_breakdown: dict[str, float] = {}
+    for act in activities:
+        type_breakdown[act.get("type", "workout")] = type_breakdown.get(act.get("type", "workout"), 0) + _float(act.get("minutes"))
+    return {
+        "active_minutes": round(sum(_float(a.get("minutes")) * (1.5 if a.get("intensity") == "high" else 1.0) for a in activities)),
+        "raw_minutes": _round(_sum(activities, "minutes"), 1),
+        "workouts": len(activities),
+        "calories_burned": round(_sum(activities, "calories_burned")),
+        "distance_m": round(_sum(activities, "distance_m")),
+        "steps": round(_sum(activities, "steps")),
+        "average_heartrate": _avg([_float(a.get("average_heartrate")) for a in activities]),
+        "type_breakdown": [{"type": k, "minutes": round(v)} for k, v in sorted(type_breakdown.items(), key=lambda item: item[1], reverse=True)],
+    }
+
+
+def _day_log(meals: list[dict], activities: list[dict], start: date, end: date, targets: dict | None = None) -> list[dict]:
+    t = {**DEFAULT_USER_TARGETS, **(targets or {})}
+    rows = []
+    for day in _date_list(start, end):
+        key = day.isoformat()
+        day_meals = [m for m in meals if str(m.get("date", ""))[:10] == key]
+        day_acts = [a for a in activities if str(a.get("date", ""))[:10] == key]
+        calories = _sum(day_meals, "calories")
+        sugar = _sum(day_meals, "sugar_g")
+        sodium = _sum(day_meals, "sodium_mg")
+        active = sum(_float(a.get("minutes")) * (1.5 if a.get("intensity") == "high" else 1.0) for a in day_acts)
+        if not day_meals and not day_acts:
+            status = "empty"
+        elif sugar > t["sugar_g_per_day"] or sodium > t["sodium_mg_per_day"]:
+            status = "elevated" if active < 20 else "watch"
+        elif active >= 20 and day_meals:
+            status = "healthy"
+        else:
+            status = "watch"
+        rows.append({
+            "date": key,
+            "calories": round(calories),
+            "sugar_g": round(sugar, 1),
+            "sodium_mg": round(sodium),
+            "active_min": round(active),
+            "steps": round(_sum(day_acts, "steps")),
+            "meals": len(day_meals),
+            "activities": len(day_acts),
+            "meal_names": [m.get("items_summary") or m.get("meal_guess", "meal") for m in day_meals[:3]],
+            "activity_names": [a.get("name") or a.get("type", "activity") for a in day_acts[:3]],
+            "status": status,
+        })
+    return rows
+
+
+def _trend(day_rows: list[dict], activities: list[dict]) -> list[dict]:
+    burned_by_day = {}
+    for act in activities:
+        d = str(act.get("date", ""))[:10]
+        burned_by_day[d] = burned_by_day.get(d, 0) + _float(act.get("calories_burned"))
+    return [{**row, "calories_burned": round(burned_by_day.get(row["date"], 0))} for row in day_rows]
+
+
+def _analytics(meals: list[dict], activities: list[dict], start: date, end: date) -> dict:
+    period_days = max((end - start).days + 1, 1)
+    period_meals = _filter_range(meals, start, end)
+    period_acts = _filter_range(activities, start, end)
+    food = _food_summary(period_meals, period_days)
+    movement = _movement_summary(period_acts)
+    return {
+        "meals": period_meals,
+        "activities": period_acts,
+        "food": food,
+        "movement": movement,
+        "summary": {
+            **food["daily_avg"],
+            "meal_count": food["meal_count"],
+            "days_logged": food["days_logged"],
+            **movement,
+        },
+    }
+
+
+def _delta(current: float, previous: float, lower_is_better: bool = False) -> dict:
+    if previous <= 0:
+        return {"current": current, "previous": previous, "change_pct": None, "direction": "none"}
+    pct = round((current - previous) / previous * 100, 1)
+    improved = pct < 0 if lower_is_better else pct > 0
+    return {"current": current, "previous": previous, "change_pct": pct, "direction": "good" if improved else "bad" if pct else "none"}
+
+
+def _comparisons(current: dict, previous: dict, previous_month: dict) -> dict:
+    metrics = [
+        ("calories", "Calories/day", "kcal", True),
+        ("sugar_g", "Sugar/day", "g", True),
+        ("sodium_mg", "Sodium/day", "mg", True),
+        ("active_minutes", "Active minutes", "min", False),
+        ("steps", "Steps", "steps", False),
+    ]
+    def build(base: dict, enough: bool) -> list[dict]:
+        rows = []
+        for key, label, unit, lower in metrics:
+            cur = _float(current["summary"].get(key))
+            prev = _float(base["summary"].get(key))
+            rows.append({"key": key, "label": label, "unit": unit, "enough_data": enough and prev > 0, **_delta(cur, prev, lower)})
+        return rows
+    return {
+        "previous_period": build(previous, bool(previous["meals"] or previous["activities"])),
+        "previous_month_average": build(previous_month, bool(previous_month["meals"] or previous_month["activities"])),
+    }
+
+
+def _user_targets(user_id: str) -> dict:
+    raw = storage.get_user(user_id).get("targets") or {}
+    targets = {**DEFAULT_USER_TARGETS}
+    for key in targets:
+        if key in raw:
+            targets[key] = max(0, _float(raw.get(key), targets[key]))
+    return targets
+
+
 def _fallback_weekly_insight(score_data: dict) -> str:
     weekly = score_data.get("weekly", {})
     signals = score_data.get("signals", [])
     signal = next((s for s in signals if s.get("level") != "healthy"), signals[0] if signals else {})
-    action = "Log meals on at least 5 days this week so the score has a stronger baseline."
+    action = "Log meals on at least 5 days this period so the score has a stronger baseline."
     if weekly.get("active_minutes", 0) < 150:
-        action = "Add three 20-minute brisk walks this week to move closer to the 150-minute activity target."
+        action = "Add three 20-minute brisk walks this week to move closer to the activity target."
     elif weekly.get("avg_sodium_mg", 0) > 2000:
         action = "Choose one lower-salt swap each day, such as less packaged food or asking for less salt in cooked meals."
     elif weekly.get("avg_sugar_g", 0) > 50:
@@ -37,14 +303,16 @@ def _fallback_weekly_insight(score_data: dict) -> str:
         action = "Add one protein serving such as dal, paneer, eggs, curd, chana, or lean meat to one meal daily."
     return (
         f"Your VitalScore is {score_data.get('score')} ({score_data.get('band')}). "
-        f"This week you logged {weekly.get('active_minutes', 0)} active minutes, "
+        f"This period you logged {weekly.get('active_minutes', 0)} active minutes, "
         f"{weekly.get('avg_sugar_g', 0)}g sugar/day, and {weekly.get('avg_sodium_mg', 0)}mg sodium/day. "
         f"Main signal: {str(signal.get('type', 'overall balance')).replace('_', ' ')} - "
         f"{signal.get('why', 'your recent logs need a little more consistency')}. {action}"
     )
 
+
 @app.get("/api/health")
 def health(): return {"ok": True}
+
 
 @app.get("/api/config")
 def config():
@@ -56,6 +324,33 @@ def config():
         "auth_enabled": AUTH_CONFIGURED,
         "auth_error": AUTH_CONFIG_ERROR,
     }
+
+
+class TargetIn(BaseModel):
+    calories_per_day: float = DEFAULT_USER_TARGETS["calories_per_day"]
+    sugar_g_per_day: float = DEFAULT_USER_TARGETS["sugar_g_per_day"]
+    sodium_mg_per_day: float = DEFAULT_USER_TARGETS["sodium_mg_per_day"]
+    protein_g_per_day: float = DEFAULT_USER_TARGETS["protein_g_per_day"]
+    fiber_g_per_day: float = DEFAULT_USER_TARGETS["fiber_g_per_day"]
+    activity_min_per_week: float = DEFAULT_USER_TARGETS["activity_min_per_week"]
+    steps_per_day: float = DEFAULT_USER_TARGETS["steps_per_day"]
+    calories_burned_per_week: float = DEFAULT_USER_TARGETS["calories_burned_per_week"]
+    distance_m_per_week: float = DEFAULT_USER_TARGETS["distance_m_per_week"]
+
+
+@app.get("/api/targets")
+def get_targets(user_id: str=Depends(get_user_id)):
+    return _user_targets(user_id)
+
+
+@app.put("/api/targets")
+def update_targets(targets: TargetIn, user_id: str=Depends(get_user_id)):
+    clean = {}
+    for key, default in DEFAULT_USER_TARGETS.items():
+        clean[key] = max(0, _float(getattr(targets, key), default))
+    storage.set_user(user_id, {"targets": clean})
+    return clean
+
 
 @app.post("/api/meals/analyze")
 async def analyze_meal(image: UploadFile=File(...), portion_note: str=Form(""), user_id: str=Depends(get_user_id)):
@@ -74,37 +369,92 @@ async def analyze_meal(image: UploadFile=File(...), portion_note: str=Form(""), 
     except Exception as e:
         raise HTTPException(503, gemini_client.user_facing_error(e)) from e
 
+
 class MealIn(BaseModel):
-    date: str|None=None; meal_guess: str="meal"; portion_note: str=""; source: str="manual"; confidence: float=0; health_notes: list[str]=Field(default_factory=list); items: list[dict]=Field(default_factory=list); calories: float=0; protein_g: float=0; carbs_g: float=0; fat_g: float=0; sugar_g: float=0; fiber_g: float=0; sodium_mg: float=0; salt_g: float=0
+    date: str | None = None
+    meal_guess: str = "meal"
+    portion_note: str = ""
+    source: str = "manual"
+    confidence: float = 0
+    health_notes: list[str] = Field(default_factory=list)
+    items: list[dict] = Field(default_factory=list)
+    calories: float = 0
+    protein_g: float = 0
+    carbs_g: float = 0
+    fat_g: float = 0
+    sugar_g: float = 0
+    fiber_g: float = 0
+    sodium_mg: float = 0
+    salt_g: float = 0
+
 
 @app.post("/api/meals")
 def save_meal(meal: MealIn, user_id: str=Depends(get_user_id)):
-    doc=meal.model_dump(); doc["date"]=doc["date"] or datetime.now(timezone.utc).date().isoformat()
-    if not doc.get("salt_g") and doc.get("sodium_mg"):
-        doc["salt_g"]=round(float(doc.get("sodium_mg") or 0)*2.5/1000,2)
-    for item in doc.get("items", []):
-        if not item.get("salt_g") and item.get("sodium_mg"):
-            item["salt_g"]=round(float(item.get("sodium_mg") or 0)*2.5/1000,2)
-    doc["user_id"]=user_id; doc["items_summary"]=", ".join(i.get("name","?") for i in doc["items"])[:200]
+    doc = _normalize_meal_doc(meal.model_dump())
+    doc["user_id"] = user_id
     return {"id": storage.save_doc("meals", doc)}
+
+
+@app.put("/api/meals/{meal_id}")
+def update_meal(meal_id: str, meal: MealIn, user_id: str=Depends(get_user_id)):
+    existing = next((m for m in storage.query_docs("meals", user_id=user_id) if m.get("id") == meal_id), None)
+    if not existing:
+        raise HTTPException(404, "Meal not found")
+    doc = _normalize_meal_doc({**meal.model_dump(), "id": meal_id})
+    doc["user_id"] = user_id
+    doc["created_at"] = existing.get("created_at")
+    return {"id": storage.save_doc("meals", doc)}
+
 
 @app.get("/api/meals")
 def list_meals(days: int=7, user_id: str=Depends(get_user_id)):
     since=(datetime.now(timezone.utc)-timedelta(days=days)).date().isoformat()
     return storage.query_docs("meals", user_id=user_id, since_iso=since)
 
+
 class ActivityIn(BaseModel):
-    date: str|None=None; type: str="walk"; minutes: float=30; intensity: str="moderate"; source: str="manual"
+    date: str | None = None
+    type: str = "walk"
+    minutes: float = 30
+    intensity: str = "moderate"
+    source: str = "manual"
+    name: str = ""
+    distance_m: float | None = None
+    calories_burned: float | None = None
+    average_heartrate: float | None = None
+    max_heartrate: float | None = None
+    elapsed_minutes: float | None = None
+    steps: float | None = None
+    notes: str = ""
+
 
 @app.post("/api/activities")
 def save_activity(act: ActivityIn, user_id: str=Depends(get_user_id)):
-    doc=act.model_dump(); doc["date"]=doc["date"] or datetime.now(timezone.utc).date().isoformat()
-    doc["user_id"]=user_id; return {"id": storage.save_doc("activities", doc)}
+    doc = _normalize_activity_doc(act.model_dump())
+    doc["source"] = "manual"
+    doc["user_id"] = user_id
+    return {"id": storage.save_doc("activities", doc)}
+
+
+@app.put("/api/activities/{activity_id}")
+def update_activity(activity_id: str, act: ActivityIn, user_id: str=Depends(get_user_id)):
+    existing = next((a for a in storage.query_docs("activities", user_id=user_id) if a.get("id") == activity_id), None)
+    if not existing:
+        raise HTTPException(404, "Activity not found")
+    if existing.get("source") == "strava":
+        raise HTTPException(409, "Strava activities are read-only. Re-sync Strava to refresh them.")
+    doc = _normalize_activity_doc({**act.model_dump(), "id": activity_id})
+    doc["source"] = existing.get("source") or "manual"
+    doc["user_id"] = user_id
+    doc["created_at"] = existing.get("created_at")
+    return {"id": storage.save_doc("activities", doc)}
+
 
 @app.get("/api/activities")
 def list_activities(days: int=7, user_id: str=Depends(get_user_id)):
     since=(datetime.now(timezone.utc)-timedelta(days=days)).date().isoformat()
     return storage.query_docs("activities", user_id=user_id, since_iso=since)
+
 
 @app.get("/auth/strava/login")
 def strava_login(user_id: str=Depends(get_user_id)):
@@ -120,10 +470,12 @@ def strava_login(user_id: str=Depends(get_user_id)):
     }
     return {"url": f"https://www.strava.com/oauth/authorize?{urlencode(params)}"}
 
+
 def _encode_strava_state(user_id: str) -> str:
     payload=base64.urlsafe_b64encode(json.dumps({"u":user_id,"iat":int(datetime.now(timezone.utc).timestamp())},separators=(",",":")).encode()).decode().rstrip("=")
     sig=hmac.new(STRAVA_SECRET.encode(),payload.encode(),hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
+
 
 def _decode_strava_state(state: str) -> str:
     try:
@@ -136,6 +488,7 @@ def _decode_strava_state(state: str) -> str:
     except Exception:
         return ""
 
+
 def _store_strava_tokens(user_id: str, token_data: dict, scope: str="") -> None:
     current=storage.get_user(user_id)
     storage.set_user(user_id,{
@@ -146,6 +499,7 @@ def _store_strava_tokens(user_id: str, token_data: dict, scope: str="") -> None:
         "strava_scope": scope or token_data.get("scope") or current.get("strava_scope",""),
         "strava_athlete_id": str((token_data.get("athlete") or {}).get("id") or current.get("strava_athlete_id","")),
     })
+
 
 async def _strava_access_token(user_id: str) -> str:
     user=storage.get_user(user_id)
@@ -167,22 +521,34 @@ async def _strava_access_token(user_id: str) -> str:
     _store_strava_tokens(user_id,token_data,user.get("strava_scope",""))
     return token_data["access_token"]
 
+
 def _activity_from_strava(user_id: str, activity: dict) -> dict:
     start=str(activity.get("start_date_local") or activity.get("start_date") or "")[:10]
-    avg_hr=float(activity.get("average_heartrate") or 0)
-    return {
+    avg_hr=_float(activity.get("average_heartrate"))
+    moving_seconds = _float(activity.get("moving_time") or activity.get("elapsed_time"))
+    elapsed_seconds = _float(activity.get("elapsed_time") or moving_seconds)
+    calories = _float(activity.get("calories")) or (_float(activity.get("kilojoules")) * 239.006 if activity.get("kilojoules") else 0)
+    return _normalize_activity_doc({
         "id": f"strava-{activity['id']}",
         "user_id": user_id,
         "date": start or datetime.now(timezone.utc).date().isoformat(),
         "type": str(activity.get("sport_type") or activity.get("type") or "workout").replace("_"," ").lower(),
-        "minutes": round(float(activity.get("moving_time") or activity.get("elapsed_time") or 0)/60,1),
+        "minutes": round(moving_seconds/60,1),
+        "elapsed_minutes": round(elapsed_seconds/60,1),
         "intensity": "high" if avg_hr>140 else "moderate",
         "source": "strava",
         "strava_id": str(activity.get("id")),
         "name": activity.get("name","Strava activity"),
-        "distance_m": round(float(activity.get("distance") or 0),1),
+        "distance_m": round(_float(activity.get("distance")),1),
+        "calories_burned": round(calories),
         "average_heartrate": avg_hr or None,
-    }
+        "max_heartrate": _float(activity.get("max_heartrate")) or None,
+        "steps": _float(activity.get("steps")) or None,
+        "elevation_gain_m": _float(activity.get("total_elevation_gain")) or None,
+        "average_speed_mps": _float(activity.get("average_speed")) or None,
+        "max_speed_mps": _float(activity.get("max_speed")) or None,
+    })
+
 
 async def _sync_strava_activities(user_id: str, access_token: str, days: int=30) -> int:
     days=max(1,min(days,90))
@@ -203,6 +569,7 @@ async def _sync_strava_activities(user_id: str, access_token: str, days: int=30)
     storage.set_user(user_id,{"strava_connected":True,"strava_last_sync_at":datetime.now(timezone.utc).isoformat()})
     return imported
 
+
 @app.get("/auth/strava/callback")
 async def strava_callback(code: str="", state: str="", scope: str=""):
     user_id=_decode_strava_state(state)
@@ -220,6 +587,7 @@ async def strava_callback(code: str="", state: str="", scope: str=""):
         return RedirectResponse("/?strava=error")
     return RedirectResponse(f"/?strava=ok&synced={imported}")
 
+
 @app.post("/api/strava/sync")
 async def sync_strava(days: int=30, user_id: str=Depends(get_user_id)):
     if not STRAVA_ID or not STRAVA_SECRET: raise HTTPException(501, "Strava not configured")
@@ -227,23 +595,42 @@ async def sync_strava(days: int=30, user_id: str=Depends(get_user_id)):
     imported=await _sync_strava_activities(user_id,access,days=days)
     return {"ok": True, "synced": imported, "last_sync_at": storage.get_user(user_id).get("strava_last_sync_at","")}
 
+
 @app.get("/api/dashboard")
-def dashboard(insight: bool=False, user_id: str=Depends(get_user_id)):
-    since=(datetime.now(timezone.utc)-timedelta(days=8)).date().isoformat()
-    meals=storage.query_docs("meals",user_id=user_id,since_iso=since)
-    acts=storage.query_docs("activities",user_id=user_id,since_iso=since)
-    result=scoring.compute_score(meals,acts)
-    trend={}
-    for m in meals:
-        d=str(m.get("date",""))[:10]; trend.setdefault(d,{"calories":0,"active_min":0}); trend[d]["calories"]+=float(m.get("calories") or 0)
-    for a in acts:
-        d=str(a.get("date",""))[:10]; trend.setdefault(d,{"calories":0,"active_min":0}); trend[d]["active_min"]+=float(a.get("minutes") or 0)
-    result["trend"]=[{"date":d,**v} for d,v in sorted(trend.items())]
+def dashboard(period: str="week", anchor: str|None=None, insight: bool=False, user_id: str=Depends(get_user_id)):
+    period, start, end = _period_bounds(period, anchor)
+    prev_start, prev_end = _previous_bounds(period, start, end)
+    month_start, month_end = _previous_month_bounds(start)
+    targets = _user_targets(user_id)
+
+    meals=storage.query_docs("meals",user_id=user_id)
+    acts=storage.query_docs("activities",user_id=user_id)
+    current = _analytics(meals, acts, start, end)
+    previous = _analytics(meals, acts, prev_start, prev_end)
+    previous_month = _analytics(meals, acts, month_start, month_end)
+    result=scoring.compute_score(current["meals"], current["activities"], targets=targets, start_date=start, end_date=end)
+    day_rows = _day_log(current["meals"], current["activities"], start, end, targets)
+    result.update({
+        "period": {
+            "mode": period,
+            "start": _iso(start),
+            "end": _iso(end),
+            "label": f"{start.strftime('%b %d')} - {end.strftime('%b %d, %Y')}" if period == "week" else start.strftime("%B %Y"),
+            "days": max((end-start).days+1,1),
+        },
+        "summary": current["summary"],
+        "food": current["food"],
+        "movement": current["movement"],
+        "comparisons": _comparisons(current, previous, previous_month),
+        "day_log": day_rows,
+        "trend": _trend(day_rows, current["activities"]),
+        "targets": {**targets, **result.get("targets", {})},
+    })
     user=storage.get_user(user_id)
     result["strava_connected"]=bool(user.get("strava_connected") and user.get("strava_refresh_token"))
     result["strava_last_sync_at"]=user.get("strava_last_sync_at","")
-    if insight and (meals or acts):
-        insight_data={k:result[k] for k in ("score","band","components","weekly","signals")}
+    if insight and (current["meals"] or current["activities"]):
+        insight_data={k:result[k] for k in ("score","band","components","weekly","signals","period","food","movement","comparisons")}
         try:
             result["insight"]=gemini_client.weekly_insight(insight_data)
             result["insight_source"]="gemini"
@@ -256,8 +643,11 @@ def dashboard(insight: bool=False, user_id: str=Depends(get_user_id)):
             result["insight_note"]="Gemini was temporarily unavailable, so VitalLens generated this from the local score data."
     return result
 
+
 class ChatIn(BaseModel):
-    message: str; history: list[dict]=[]
+    message: str
+    history: list[dict]=[]
+
 
 @app.post("/api/chat")
 def chat(body: ChatIn, user_id: str=Depends(get_user_id)):
@@ -272,6 +662,7 @@ def chat(body: ChatIn, user_id: str=Depends(get_user_id)):
     except Exception as e:
         raise HTTPException(503, gemini_client.user_facing_error(e)) from e
     return {"reply": reply}
+
 
 WARDS=["Saket","Dwarka","Rohini","Lajpat Nagar","Karol Bagh","Vasant Kunj"]
 DEMO_SCENARIOS=[
@@ -331,6 +722,7 @@ LEGACY_DEMO_MEAL_NAMES={
 }
 DEMO_MEAL_NAMES={name for scenario in DEMO_SCENARIOS for name, *_ in scenario["meals"]}|LEGACY_DEMO_MEAL_NAMES
 
+
 @app.get("/api/community")
 def community():
     meals=storage.all_docs("meals"); acts=storage.all_docs("activities")
@@ -346,6 +738,7 @@ def community():
     wards=[{"ward":w,"avg_active_min":rng.randint(60,190),"avg_sodium_mg":rng.randint(1700,3400),"elevated_risk_pct":rng.randint(12,41)} for w in WARDS]
     return {"platform_users":len(users),"median_daily_sodium_mg":med(sod,2450),"median_daily_sugar_g":med(sug,58),"median_weekly_active_min":med(act,95),"wards":wards,"note":"Ward figures are illustrative demo data."}
 
+
 @app.post("/api/demo/seed")
 def demo_seed(user_id: str=Depends(get_user_id)):
     rng=random.Random()
@@ -357,10 +750,12 @@ def demo_seed(user_id: str=Depends(get_user_id)):
             storage.delete_doc("activities",doc["id"])
     scenario=rng.choice(DEMO_SCENARIOS)
     today=datetime.now(timezone.utc).date()
-    for d in range(7):
+    activity_types=["walk","run","cycling","yoga","gym","swim"]
+    for d in range(45):
         day=(today-timedelta(days=d)).isoformat()
+        period_factor = 1.0 if d < 7 else rng.uniform(0.78, 1.12)
         for slot,(name,cal,p,c,f,s,fi,na) in enumerate(scenario["meals"]):
-            multiplier=rng.uniform(0.92,1.08)
+            multiplier=rng.uniform(0.92,1.08)*period_factor
             item={
                 "name":name,
                 "portion":"1 serving",
@@ -373,13 +768,12 @@ def demo_seed(user_id: str=Depends(get_user_id)):
                 "sodium_mg":round(na*multiplier),
             }
             item["salt_g"]=round(item["sodium_mg"]*2.5/1000,2)
-            storage.save_doc("meals",{
+            storage.save_doc("meals",_normalize_meal_doc({
                 "user_id":user_id,
                 "date":day,
                 "meal_guess":["breakfast","lunch","dinner"][slot],
                 "source":"demo",
                 "items":[item],
-                "items_summary":name,
                 "calories":item["calories"],
                 "protein_g":item["protein_g"],
                 "carbs_g":item["carbs_g"],
@@ -389,16 +783,42 @@ def demo_seed(user_id: str=Depends(get_user_id)):
                 "sodium_mg":item["sodium_mg"],
                 "salt_g":item["salt_g"],
                 "health_notes":[f"Demo scenario: {scenario['label']}."],
-            })
-        minutes=max(0,round(scenario["activity"][d]*rng.uniform(0.85,1.15)))
+            }))
+        minutes=max(0,round(scenario["activity"][d%7]*rng.uniform(0.8,1.2)*period_factor))
         if minutes:
-            storage.save_doc("activities",{"user_id":user_id,"date":day,"type":rng.choice(["walk","run","cycling","yoga"]),"minutes":minutes,"intensity":scenario["intensity"],"source":"demo"})
-    meals=storage.query_docs("meals",user_id=user_id,since_iso=(today-timedelta(days=7)).isoformat())
-    acts=storage.query_docs("activities",user_id=user_id,since_iso=(today-timedelta(days=7)).isoformat())
-    result=scoring.compute_score(meals,acts)
+            activity_type=rng.choice(activity_types)
+            distance = 0
+            if activity_type in {"walk","run"}:
+                distance = minutes * (85 if activity_type == "walk" else 150)
+            elif activity_type == "cycling":
+                distance = minutes * 330
+            elif activity_type == "swim":
+                distance = minutes * 35
+            storage.save_doc("activities",_normalize_activity_doc({
+                "user_id":user_id,
+                "date":day,
+                "type":activity_type,
+                "name":f"Demo {activity_type}",
+                "minutes":minutes,
+                "elapsed_minutes":round(minutes*rng.uniform(1,1.18),1),
+                "intensity":scenario["intensity"],
+                "source":"demo",
+                "distance_m":round(distance,1) if distance else None,
+                "calories_burned":round(minutes*rng.uniform(4.5,9.5)),
+                "average_heartrate":round(rng.uniform(92,154)) if activity_type not in {"yoga"} else round(rng.uniform(78,105)),
+                "max_heartrate":round(rng.uniform(130,178)) if activity_type not in {"yoga"} else round(rng.uniform(100,128)),
+                "steps":round(distance / 0.78) if activity_type in {"walk","run"} and distance else None,
+                "notes":"Demo activity for dashboard comparisons.",
+            }))
+    start=today-timedelta(days=6)
+    meals=storage.query_docs("meals",user_id=user_id,since_iso=start.isoformat())
+    acts=storage.query_docs("activities",user_id=user_id,since_iso=start.isoformat())
+    result=scoring.compute_score(meals,acts,start_date=start,end_date=today)
     return {"ok":True,"scenario":scenario["key"],"label":scenario["label"],"score":result["score"],"band":result["band"]}
 
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 
 @app.get("/{full_path:path}")
 def spa_fallback(full_path: str): return FileResponse(os.path.join(STATIC_DIR, "index.html"))
