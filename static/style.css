@@ -86,8 +86,8 @@ input[type=text],input[type=number],select{width:100%;padding:12px 14px;border:1
 .meal-form{display:flex;flex-direction:column;gap:4px;max-width:520px}
 .drop{border:2px dashed var(--line);border-radius:16px;min-height:150px;display:flex;
   align-items:center;justify-content:center;cursor:pointer;margin-bottom:12px;overflow:hidden;background:var(--paper)}
-.drop:hover{border-color:var(--volt-dark)}
-.drop img{max-width:100%;max-height:260px;border-radius:12px}
+.drop:hover,.drop:focus-visible,.drop.dragover{border-color:var(--volt-dark);outline:none;background:#F4FBE4}
+.drop img{max-width:100%;max-height:260px;border-radius:12px;object-fit:contain}
 .drop span{color:var(--muted);font-weight:600}
 .ntable{width:100%;border-collapse:collapse;margin:10px 0 14px;font-size:.88rem}
 .ntable th{text-align:left;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1.5px solid var(--line)}

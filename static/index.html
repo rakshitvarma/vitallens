@@ -54,7 +54,11 @@
     <h2>Snap it. We'll count it.</h2>
     <p class="sub">Upload a photo of your plate. Gemini identifies each dish and returns full nutrition.</p>
     <div class="meal-form">
-      <label class="drop" id="drop"><input type="file" id="mealImage" accept="image/*" hidden/><span id="dropText">Tap to choose a meal photo</span><img id="preview" hidden alt="meal preview"/></label>
+      <div class="drop" id="drop" role="button" tabindex="0" aria-label="Choose a meal photo">
+        <input type="file" id="mealImage" accept="image/*" hidden/>
+        <span id="dropText">Tap to choose or drop a meal photo</span>
+        <img id="preview" hidden alt="meal preview"/>
+      </div>
       <input type="text" id="portionNote" placeholder="Portion details, e.g. '2 rotis, small bowl of dal'"/>
       <button class="btn primary" id="btnAnalyze">Analyze with Gemini</button>
     </div>

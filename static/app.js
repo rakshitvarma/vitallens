@@ -92,13 +92,70 @@ $("btnInsight").addEventListener("click",async()=>{const b=$("btnInsight");b.dis
 $("btnSeed").addEventListener("click",async()=>{await api("/api/demo/seed",{method:"POST"});toast("Demo week loaded");loadDashboard();});
 
 let lastAnalysis=null;
-$("drop").addEventListener("click",()=>$("mealImage").click());
-$("mealImage").addEventListener("change",()=>{const f=$("mealImage").files[0];if(!f)return;$("preview").src=URL.createObjectURL(f);$("preview").hidden=false;$("dropText").hidden=true;});
+let selectedMealFile=null;
+let previewUrl=null;
+const MAX_UPLOAD_BYTES=7_500_000;
+const MAX_IMAGE_DIMENSION=1600;
+
+const drop=$("drop");
+const mealImage=$("mealImage");
+
+const setMealFile=file=>{
+  if(!file)return;
+  if(!file.type?.startsWith("image/")){
+    toast("Choose an image file");
+    return;
+  }
+  selectedMealFile=file;
+  lastAnalysis=null;
+  $("analysisResult").hidden=true;
+  if(previewUrl)URL.revokeObjectURL(previewUrl);
+  previewUrl=URL.createObjectURL(file);
+  $("preview").src=previewUrl;
+  $("preview").hidden=false;
+  $("dropText").hidden=true;
+};
+
+const loadImage=file=>new Promise((resolve,reject)=>{
+  const img=new Image();
+  const url=URL.createObjectURL(file);
+  img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};
+  img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("Could not read this image. Try a JPG, PNG, or WebP photo."));};
+  img.src=url;
+});
+
+const prepareImageForUpload=async file=>{
+  if(file.size<=MAX_UPLOAD_BYTES)return file;
+  const img=await loadImage(file);
+  const scale=Math.min(1,MAX_IMAGE_DIMENSION/Math.max(img.naturalWidth,img.naturalHeight));
+  const canvas=document.createElement("canvas");
+  canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+  canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+  canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,"image/jpeg",0.82));
+  if(!blob)throw new Error("Could not prepare this image for upload");
+  const name=(file.name||"meal-photo").replace(/\.[^.]+$/,"")+".jpg";
+  const prepared=new File([blob],name,{type:"image/jpeg"});
+  if(prepared.size>MAX_UPLOAD_BYTES)throw new Error("Image is still too large after compression. Try a smaller photo.");
+  return prepared;
+};
+
+drop.addEventListener("click",e=>{if(e.target!==mealImage){mealImage.value="";mealImage.click();}});
+drop.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();mealImage.value="";mealImage.click();}});
+mealImage.addEventListener("change",()=>setMealFile(mealImage.files[0]));
+["dragenter","dragover"].forEach(type=>drop.addEventListener(type,e=>{e.preventDefault();drop.classList.add("dragover");}));
+["dragleave","drop"].forEach(type=>drop.addEventListener(type,e=>{e.preventDefault();drop.classList.remove("dragover");}));
+drop.addEventListener("drop",e=>setMealFile(e.dataTransfer.files[0]));
 $("btnAnalyze").addEventListener("click",async()=>{
-  const f=$("mealImage").files[0];if(!f)return toast("Choose a meal photo first");
-  const fd=new FormData();fd.append("image",f);fd.append("portion_note",$("portionNote").value);
-  const b=$("btnAnalyze");b.disabled=true;b.textContent="Gemini is analyzing…";
-  try{lastAnalysis=await api("/api/meals/analyze",{method:"POST",body:fd});renderAnalysis(lastAnalysis);}catch(e){toast("Analysis failed: "+e.message);}
+  if(!selectedMealFile)return toast("Choose a meal photo first");
+  const b=$("btnAnalyze");b.disabled=true;b.textContent="Preparing image...";
+  try{
+    const uploadFile=await prepareImageForUpload(selectedMealFile);
+    const fd=new FormData();fd.append("image",uploadFile,uploadFile.name);fd.append("portion_note",$("portionNote").value);
+    b.textContent="Gemini is analyzing...";
+    lastAnalysis=await api("/api/meals/analyze",{method:"POST",body:fd});
+    renderAnalysis(lastAnalysis);
+  }catch(e){toast("Analysis failed: "+e.message);}
   b.disabled=false;b.textContent="Analyze with Gemini";
 });
 function renderAnalysis(a){

@@ -20,6 +20,7 @@ STRAVA_ID = os.environ.get("STRAVA_CLIENT_ID", "")
 STRAVA_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8080")
 STRAVA_SCOPE = "activity:read_all"
+MAX_IMAGE_BYTES = 8_000_000
 
 def _fallback_weekly_insight(score_data: dict) -> str:
     weekly = score_data.get("weekly", {})
@@ -59,9 +60,15 @@ def config():
 @app.post("/api/meals/analyze")
 async def analyze_meal(image: UploadFile=File(...), portion_note: str=Form(""), user_id: str=Depends(get_user_id)):
     data = await image.read()
-    if len(data) > 8_000_000: raise HTTPException(413, "Image too large")
+    mime_type = image.content_type or "image/jpeg"
+    if not data:
+        raise HTTPException(400, "No image uploaded")
+    if not mime_type.startswith("image/"):
+        raise HTTPException(415, "Upload a meal photo image")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "Image too large. Use a smaller photo under 8 MB.")
     try:
-        return gemini_client.analyze_meal_image(data, image.content_type or "image/jpeg", portion_note)
+        return gemini_client.analyze_meal_image(data, mime_type, portion_note)
     except RuntimeError as e:
         raise HTTPException(503, str(e)) from e
     except Exception as e:
