@@ -274,6 +274,62 @@ def chat(body: ChatIn, user_id: str=Depends(get_user_id)):
     return {"reply": reply}
 
 WARDS=["Saket","Dwarka","Rohini","Lajpat Nagar","Karol Bagh","Vasant Kunj"]
+DEMO_SCENARIOS=[
+    {
+        "key":"thriving",
+        "label":"balanced high-activity week",
+        "activity":[35,40,30,45,35,30,50],
+        "intensity":"moderate",
+        "meals":[
+            ("Moong dal chilla + curd",420,24,52,12,8,9,540),
+            ("Dal, brown rice + salad",610,24,86,14,7,13,780),
+            ("Paneer tikka, roti + vegetables",590,34,58,20,8,9,720),
+        ],
+    },
+    {
+        "key":"on_track",
+        "label":"mostly steady week",
+        "activity":[25,20,30,0,35,25,30],
+        "intensity":"moderate",
+        "meals":[
+            ("Idli sambhar + chutney",500,16,84,10,8,6,920),
+            ("Rajma chawal + salad",690,22,106,14,9,14,1080),
+            ("Chicken curry, roti + curd",720,42,72,24,10,5,980),
+        ],
+    },
+    {
+        "key":"caution",
+        "label":"high-salt low-activity week",
+        "activity":[0,20,0,15,0,20,0],
+        "intensity":"moderate",
+        "meals":[
+            ("Aloo paratha + sweet chai",760,16,104,30,28,8,1280),
+            ("Veg pulao + raita",820,18,122,24,16,6,1520),
+            ("Paneer butter masala + naan",920,28,96,44,18,5,1720),
+        ],
+    },
+    {
+        "key":"at_risk",
+        "label":"sugary sedentary week",
+        "activity":[0,0,10,0,0,15,0],
+        "intensity":"moderate",
+        "meals":[
+            ("Chole bhature + sweet lassi",1080,22,142,44,44,10,1850),
+            ("Chicken biryani + cola",1080,36,136,36,48,4,1760),
+            ("Paneer butter masala, naan + gulab jamun",1260,34,138,58,54,5,2120),
+        ],
+    },
+]
+LEGACY_DEMO_MEAL_NAMES={
+    "Aloo paratha + curd",
+    "Dal tadka + jeera rice",
+    "Chicken biryani",
+    "Rajma chawal",
+    "Masala dosa",
+    "Paneer butter masala",
+    "Chole bhature",
+}
+DEMO_MEAL_NAMES={name for scenario in DEMO_SCENARIOS for name, *_ in scenario["meals"]}|LEGACY_DEMO_MEAL_NAMES
 
 @app.get("/api/community")
 def community():
@@ -292,17 +348,55 @@ def community():
 
 @app.post("/api/demo/seed")
 def demo_seed(user_id: str=Depends(get_user_id)):
-    rng=random.Random(); menu=[("Aloo paratha + curd",520,12,68,22,8,7,780),("Dal tadka + jeera rice",640,22,92,18,6,12,1150),("Chicken biryani",780,34,96,28,9,5,1450),("Rajma chawal",560,19,88,12,7,13,980),("Masala dosa",480,11,74,16,10,5,1120),("Paneer butter masala",820,26,72,46,14,4,1380),("Chole bhature",760,18,94,34,11,10,1350)]
+    rng=random.Random()
+    for doc in storage.query_docs("meals",user_id=user_id):
+        if doc.get("source")=="demo" or doc.get("items_summary") in DEMO_MEAL_NAMES:
+            storage.delete_doc("meals",doc["id"])
+    for doc in storage.query_docs("activities",user_id=user_id):
+        if doc.get("source")=="demo":
+            storage.delete_doc("activities",doc["id"])
+    scenario=rng.choice(DEMO_SCENARIOS)
     today=datetime.now(timezone.utc).date()
     for d in range(7):
         day=(today-timedelta(days=d)).isoformat()
-        for _ in range(rng.randint(2,3)):
-            name,cal,p,c,f,s,fi,na=rng.choice(menu)
-            sodium=na*rng.uniform(0.85,1.25)
-            storage.save_doc("meals",{"user_id":user_id,"date":day,"meal_guess":"meal","items":[{"name":name,"portion":"1 serving","calories":cal,"protein_g":p,"carbs_g":c,"fat_g":f,"sugar_g":s,"fiber_g":fi,"sodium_mg":na,"salt_g":round(na*2.5/1000,2)}],"items_summary":name,"calories":cal*rng.uniform(0.85,1.15),"protein_g":p,"carbs_g":c,"fat_g":f,"sugar_g":s*rng.uniform(0.8,1.4),"fiber_g":fi,"sodium_mg":sodium,"salt_g":round(sodium*2.5/1000,2),"health_notes":["Demo estimate based on typical Indian serving sizes."]})
-        if rng.random()<0.6:
-            storage.save_doc("activities",{"user_id":user_id,"date":day,"type":rng.choice(["walk","run","cycling","yoga"]),"minutes":rng.choice([20,30,45]),"intensity":rng.choice(["moderate","moderate","high"]),"source":"demo"})
-    return {"ok":True}
+        for slot,(name,cal,p,c,f,s,fi,na) in enumerate(scenario["meals"]):
+            multiplier=rng.uniform(0.92,1.08)
+            item={
+                "name":name,
+                "portion":"1 serving",
+                "calories":round(cal*multiplier),
+                "protein_g":round(p*multiplier,1),
+                "carbs_g":round(c*multiplier,1),
+                "fat_g":round(f*multiplier,1),
+                "sugar_g":round(s*multiplier,1),
+                "fiber_g":round(fi*multiplier,1),
+                "sodium_mg":round(na*multiplier),
+            }
+            item["salt_g"]=round(item["sodium_mg"]*2.5/1000,2)
+            storage.save_doc("meals",{
+                "user_id":user_id,
+                "date":day,
+                "meal_guess":["breakfast","lunch","dinner"][slot],
+                "source":"demo",
+                "items":[item],
+                "items_summary":name,
+                "calories":item["calories"],
+                "protein_g":item["protein_g"],
+                "carbs_g":item["carbs_g"],
+                "fat_g":item["fat_g"],
+                "sugar_g":item["sugar_g"],
+                "fiber_g":item["fiber_g"],
+                "sodium_mg":item["sodium_mg"],
+                "salt_g":item["salt_g"],
+                "health_notes":[f"Demo scenario: {scenario['label']}."],
+            })
+        minutes=max(0,round(scenario["activity"][d]*rng.uniform(0.85,1.15)))
+        if minutes:
+            storage.save_doc("activities",{"user_id":user_id,"date":day,"type":rng.choice(["walk","run","cycling","yoga"]),"minutes":minutes,"intensity":scenario["intensity"],"source":"demo"})
+    meals=storage.query_docs("meals",user_id=user_id,since_iso=(today-timedelta(days=7)).isoformat())
+    acts=storage.query_docs("activities",user_id=user_id,since_iso=(today-timedelta(days=7)).isoformat())
+    result=scoring.compute_score(meals,acts)
+    return {"ok":True,"scenario":scenario["key"],"label":scenario["label"],"score":result["score"],"band":result["band"]}
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

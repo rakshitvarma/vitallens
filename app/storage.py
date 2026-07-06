@@ -64,6 +64,17 @@ def save_doc(collection: str, doc: dict) -> str:
     return doc_id
 
 
+def delete_doc(collection: str, doc_id: str) -> None:
+    if _use_firestore:
+        _firestore.collection(collection).document(doc_id).delete()
+        return
+    with _lock:
+        db = _load_local()
+        db.setdefault(collection, [])
+        db[collection] = [d for d in db[collection] if d.get("id") != doc_id]
+        _save_local(db)
+
+
 def query_docs(collection: str, user_id: str | None = None, since_iso: str | None = None) -> list[dict]:
     if _use_firestore:
         q = _firestore.collection(collection)

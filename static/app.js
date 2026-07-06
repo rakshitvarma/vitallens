@@ -103,7 +103,19 @@ async function loadDashboard(withInsight=false){
   }catch(e){toast("Dashboard: "+e.message);}
 }
 $("btnInsight").addEventListener("click",async()=>{const b=$("btnInsight");b.disabled=true;b.textContent="Gemini is thinking...";await loadDashboard(true);b.disabled=false;b.textContent="Generate AI weekly insight";});
-$("btnSeed").addEventListener("click",async()=>{await api("/api/demo/seed",{method:"POST"});toast("Demo week loaded");loadDashboard();});
+$("btnSeed").addEventListener("click",async()=>{
+  const b=$("btnSeed");
+  b.disabled=true;
+  b.textContent="Loading demo...";
+  try{
+    const res=await api("/api/demo/seed",{method:"POST"});
+    toast(`Demo loaded: ${res.label} (${res.score}, ${res.band})`);
+    await loadDashboard();
+    if(document.body.dataset.activeTab==="meal")await loadMeals();
+  }catch(e){toast("Demo failed: "+e.message);}
+  b.disabled=false;
+  b.textContent="Load demo week";
+});
 
 let lastAnalysis=null;
 let selectedMealFile=null;
