@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>VitalLens — AI Decision Intelligence for Everyday Health</title>
+<title>VitalLens - AI Decision Intelligence for Everyday Health</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -14,11 +14,11 @@
 <header class="topbar">
   <div class="brand"><span class="lens"></span>VitalLens</div>
   <nav id="nav">
-    <button data-tab="dashboard" class="active">Dashboard</button>
-    <button data-tab="meal">Log Meal</button>
-    <button data-tab="activity">Activity</button>
-    <button data-tab="coach">Coach</button>
-    <button data-tab="community">Community</button>
+    <button data-tab="dashboard" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v7H4zM13 5h7v4h-7zM13 11h7v8h-7zM4 14h7v5H4z"/></svg><span>Dashboard</span></button>
+    <button data-tab="meal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v8M11 3v8M7 11c0 2 4 2 4 0M9 11v10M16 4v17M16 4c3 2 4 5 3 8h-3"/></svg><span>Log Meal</span></button>
+    <button data-tab="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM10 8l-2 5 4 2 2 5M12 10l4 3 3-1M8 13l-3 6"/></svg><span>Activity</span></button>
+    <button data-tab="coach"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14v10H8l-3 3zM8 10h8M8 13h5"/></svg><span>Coach</span></button>
+    <button data-tab="community"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 20c0-4 8-4 8 0M12 20c0-4 8-4 8 0"/></svg><span>Community</span></button>
   </nav>
   <div class="user-info">
     <img id="userAvatar" class="avatar" src="" alt="" hidden/>
@@ -30,11 +30,11 @@
   <div class="hero">
     <div class="ring-wrap">
       <svg viewBox="0 0 200 200" class="ring"><circle cx="100" cy="100" r="86" class="ring-bg"/><circle cx="100" cy="100" r="86" class="ring-fg" id="ringFg"/></svg>
-      <div class="ring-center"><div class="score" id="scoreNum">–</div><div class="band" id="scoreBand">VitalScore</div></div>
+      <div class="ring-center"><div class="score" id="scoreNum">-</div><div class="band" id="scoreBand">VitalScore</div></div>
     </div>
     <div class="hero-side">
       <h1>Your week, decoded.</h1>
-      <p class="sub">Meals, movement and risk signals — analyzed by Gemini, scored transparently against WHO guidance.</p>
+      <p class="sub">Meals, movement and risk signals - analyzed by Gemini, scored transparently against WHO guidance.</p>
       <div class="stat-row" id="weeklyStats"></div>
       <div class="hero-actions">
         <button class="btn primary" id="btnInsight">Generate AI weekly insight</button>
@@ -46,7 +46,7 @@
     <div class="card"><h3>Risk signals <span class="tag">explainable</span></h3><div id="signals"></div></div>
     <div class="card"><h3>Score breakdown</h3><div id="components"></div></div>
   </div>
-  <div class="card"><h3>7-day trend — calories vs active minutes</h3><canvas id="trendChart" height="90"></canvas></div>
+  <div class="card"><h3>7-day trend - calories vs active minutes</h3><canvas id="trendChart" height="90"></canvas></div>
   <div class="card insight-card" id="insightCard" hidden><h3>Gemini weekly insight</h3><p id="insightText"></p></div>
 </section>
 <section id="tab-meal" class="tab">
@@ -94,14 +94,14 @@
 <section id="tab-coach" class="tab">
   <div class="card chat-card">
     <h2>Ask about <em>your</em> data</h2>
-    <p class="sub">"Can I eat biryani tonight?" · "Why is my score dropping?" · "Am I at risk of hypertension?"</p>
+    <p class="sub">"Can I eat biryani tonight?" - "Why is my score dropping?" - "Am I at risk of hypertension?"</p>
     <div id="chatLog" class="chat-log"></div>
-    <div class="chat-input"><input type="text" id="chatMsg" placeholder="Ask VitalLens Coach…"/><button class="btn primary" id="btnChat">Send</button></div>
+    <div class="chat-input"><input type="text" id="chatMsg" placeholder="Ask VitalLens Coach..."/><button class="btn primary" id="btnChat">Send</button></div>
   </div>
 </section>
 <section id="tab-community" class="tab">
   <div class="card">
-    <h2>Community pulse — Delhi</h2>
+    <h2>Community pulse - Delhi</h2>
     <p class="sub">Anonymized, aggregated signals for public-health stakeholders.</p>
     <div class="stat-row" id="communityStats"></div>
   </div>
@@ -112,7 +112,7 @@
   <p class="fineprint center" id="communityNote"></p>
 </section>
 </main>
-<footer>VitalLens · Gen AI Academy Hackathon 2026 · Gemini · Cloud Run · Firestore — lifestyle signals, not medical diagnosis.</footer>
+<footer>VitalLens - Gen AI Academy Hackathon 2026 - Gemini - Cloud Run - Firestore - lifestyle signals, not medical diagnosis.</footer>
 </div>
 <script src="/static/app.js"></script>
 </body>

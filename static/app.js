@@ -59,9 +59,23 @@ const api=async(path,opts={})=>{
 const toast=(msg)=>{const t=document.createElement("div");t.className="toast";t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2800);};
 const $=id=>document.getElementById(id);
 
+const animateNumber=(el,to,duration=650)=>{
+  const from=Number(el.textContent)||0;
+  const start=performance.now();
+  const tick=now=>{
+    const p=Math.min(1,(now-start)/duration);
+    const eased=1-Math.pow(1-p,3);
+    el.textContent=Math.round(from+(to-from)*eased);
+    if(p<1)requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+};
+
+document.body.dataset.activeTab="dashboard";
 document.querySelectorAll("#nav button").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll("#nav button,.tab").forEach(el=>el.classList.remove("active"));
   b.classList.add("active");$("tab-"+b.dataset.tab).classList.add("active");
+  document.body.dataset.activeTab=b.dataset.tab;
   if(b.dataset.tab==="dashboard") loadDashboard();
   if(b.dataset.tab==="meal") loadMeals();
   if(b.dataset.tab==="activity") loadActivities();
@@ -72,13 +86,13 @@ let trendChart;
 async function loadDashboard(withInsight=false){
   try{
     const d=await api("/api/dashboard"+(withInsight?"?insight=true":""));
-    $("scoreNum").textContent=d.score;$("scoreBand").textContent=d.band;
+    animateNumber($("scoreNum"),d.score);$("scoreBand").textContent=d.band;
     const ring=$("ringFg");
     ring.style.strokeDashoffset=540-(540*d.score)/100;
-    ring.style.stroke=d.score>=60?"var(--volt)":d.score>=40?"var(--amber)":"var(--red)";
+    ring.style.stroke=d.score>=60?"var(--lime)":d.score>=40?"var(--amber)":"var(--coral)";
     const w=d.weekly;
     $("weeklyStats").innerHTML=[[w.avg_calories,"avg kcal/day"],[w.active_minutes,"active min"],[w.avg_sugar_g+"g","sugar/day"],[w.avg_sodium_mg+"mg","sodium/day"],[w.days_logged+"/7","days logged"]].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
-    $("signals").innerHTML=d.signals.map(s=>`<div class="signal"><span class="dot ${s.level==="healthy"?"healthy":s.level}"></span><div><b>${s.type.replaceAll("_"," ")}</b> · ${s.level}<p>${s.why}</p></div></div>`).join("");
+    $("signals").innerHTML=d.signals.map(s=>`<div class="signal"><span class="dot ${s.level==="healthy"?"healthy":s.level}"></span><div><b>${s.type.replaceAll("_"," ")}</b> - ${s.level}<p>${s.why}</p></div></div>`).join("");
     $("components").innerHTML=Object.entries(d.components).map(([k,v])=>`<div class="comp"><div class="lbl"><span>${k}</span><span>${v}</span></div><div class="bar"><i style="width:${v}%"></i></div></div>`).join("");
     trendChart?.destroy();
     trendChart=new Chart($("trendChart"),{data:{labels:d.trend.map(t=>t.date.slice(5)),datasets:[{type:"bar",label:"Calories",data:d.trend.map(t=>Math.round(t.calories)),backgroundColor:"#0E3B2E",borderRadius:6,yAxisID:"y"},{type:"line",label:"Active minutes",data:d.trend.map(t=>t.active_min),borderColor:"#8FBF10",backgroundColor:"#8FBF10",tension:.35,yAxisID:"y1"}]},options:{scales:{y:{position:"left"},y1:{position:"right",grid:{display:false}}}}});
@@ -88,7 +102,7 @@ async function loadDashboard(withInsight=false){
     $("btnStrava").textContent=d.strava_connected?"Re-sync Strava":"Connect Strava";
   }catch(e){toast("Dashboard: "+e.message);}
 }
-$("btnInsight").addEventListener("click",async()=>{const b=$("btnInsight");b.disabled=true;b.textContent="Gemini is thinking…";await loadDashboard(true);b.disabled=false;b.textContent="Generate AI weekly insight";});
+$("btnInsight").addEventListener("click",async()=>{const b=$("btnInsight");b.disabled=true;b.textContent="Gemini is thinking...";await loadDashboard(true);b.disabled=false;b.textContent="Generate AI weekly insight";});
 $("btnSeed").addEventListener("click",async()=>{await api("/api/demo/seed",{method:"POST"});toast("Demo week loaded");loadDashboard();});
 
 let lastAnalysis=null;
@@ -109,6 +123,7 @@ const setMealFile=file=>{
   selectedMealFile=file;
   lastAnalysis=null;
   $("analysisResult").hidden=true;
+  drop.classList.add("has-file");
   if(previewUrl)URL.revokeObjectURL(previewUrl);
   previewUrl=URL.createObjectURL(file);
   $("preview").src=previewUrl;
@@ -168,7 +183,7 @@ $("btnSaveMeal").addEventListener("click",async()=>{if(!lastAnalysis)return;awai
 async function loadMeals(){const m=await api("/api/meals?days=7");$("mealList").innerHTML=m.slice(-12).reverse().map(m=>`<div class="rowitem"><div><b>${m.items_summary||m.meal_guess}</b><div class="meta">${m.date}</div></div><div>${Math.round(m.calories)} kcal</div></div>`).join("")||"<p class='sub'>No meals logged yet.</p>";}
 
 $("btnSaveAct").addEventListener("click",async()=>{await api("/api/activities",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:$("actType").value,minutes:+$("actMin").value,intensity:$("actIntensity").value})});toast("Activity added");loadActivities();});
-async function loadActivities(){const a=await api("/api/activities?days=7");$("actList").innerHTML=a.slice(-14).reverse().map(a=>`<div class="rowitem"><div><b style="text-transform:capitalize">${a.type}</b><div class="meta">${a.date} · ${a.source}</div></div><div>${a.minutes} min</div></div>`).join("")||"<p class='sub'>Nothing logged.</p>";}
+async function loadActivities(){const a=await api("/api/activities?days=7");$("actList").innerHTML=a.slice(-14).reverse().map(a=>`<div class="rowitem"><div><b style="text-transform:capitalize">${a.type}</b><div class="meta">${a.date} - ${a.source}</div></div><div>${a.minutes} min</div></div>`).join("")||"<p class='sub'>Nothing logged.</p>";}
 $("btnStrava").addEventListener("click",async()=>{
   const b=$("btnStrava");b.disabled=true;
   try{
@@ -190,7 +205,7 @@ $("btnStrava").addEventListener("click",async()=>{
 
 const chatHistory=[];
 function bubble(role,text){const b=document.createElement("div");b.className="bubble "+(role==="user"?"user":"bot");b.textContent=text;$("chatLog").appendChild(b);$("chatLog").scrollTop=1e6;return b;}
-async function sendChat(){const msg=$("chatMsg").value.trim();if(!msg)return;$("chatMsg").value="";bubble("user",msg);const t=bubble("bot","…");try{const{reply}=await api("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg,history:chatHistory})});t.textContent=reply;chatHistory.push({role:"user",text:msg},{role:"model",text:reply});}catch(e){t.textContent="Error: "+e.message;}}
+async function sendChat(){const msg=$("chatMsg").value.trim();if(!msg)return;$("chatMsg").value="";bubble("user",msg);const t=bubble("bot","...");try{const{reply}=await api("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg,history:chatHistory})});t.textContent=reply;chatHistory.push({role:"user",text:msg},{role:"model",text:reply});}catch(e){t.textContent="Error: "+e.message;}}
 $("btnChat").addEventListener("click",sendChat);
 $("chatMsg").addEventListener("keydown",e=>e.key==="Enter"&&sendChat());
 
