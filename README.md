@@ -1,120 +1,110 @@
-# VitalLens — AI Decision Intelligence for Everyday Health
+# VitalLens
 
-**Gen AI Academy Hackathon (APAC) · Track: Healthcare access & community wellness**
+VitalLens is a lifestyle intelligence web app built for the Gen AI Academy Hackathon. It helps users understand how food intake and movement patterns affect everyday health signals.
 
-Snap a photo of your meal → Gemini identifies every dish, estimates portions and returns full nutrition. Combined with your activity data (Strava sync / manual log), VitalLens computes a transparent, WHO-aligned **VitalScore (0–100)** with explainable risk signals for type-2 diabetes, hypertension and sedentary lifestyle — plus a conversational coach grounded in *your own* logged data, and an anonymized community dashboard for public-health stakeholders.
+Live app: https://vitallens-s3cdt46tda-el.a.run.app/
 
-## Architecture
+## What It Does
 
-```
-Browser SPA ──► Cloud Run (FastAPI container)
-                 ├─► Gemini 2.5 Flash (Vertex AI / AI Studio)
-                 │     · multimodal meal-photo analysis → structured JSON
-                 │     · weekly coaching insight
-                 │     · grounded chat over the user's own logs
-                 ├─► Firestore (meals, activities, users)  [local JSON fallback]
-                 ├─► Strava OAuth (activity sync, last 30 days)
-                 └─► Rule-based VitalScore engine (explainable, WHO-aligned)
-                       └─► anonymized aggregation → community pulse
-```
+- Meal photo analysis: upload a meal photo and Gemini estimates dishes, serving details, calories, protein, carbs, fat, sugar, fiber, sodium, and salt.
+- Editable meal logs: review recent meals and correct nutrition or serving details manually.
+- Movement tracking: log workouts manually or sync recent activities from Strava.
+- VitalScore dashboard: see a week or month score with food, movement, risk signals, day logs, and comparisons.
+- Personal targets: set daily food goals and weekly movement goals for calories, sugar, sodium, protein, fiber, steps, active minutes, and burn.
+- Dark mode: switch between light and dark themes with readable dashboard, form, and table colors.
+- PDF export: download the selected week/month report with summary and tabular food, movement, score, comparison, and day-log data.
+- Coach chat: ask questions about your own logged data.
+- Community pulse: view anonymized aggregate wellness signals for public-health style insights.
 
-## Run locally
+## Quick Demo Flow
+
+1. Open the live app.
+2. Click `Load demo week` on the Dashboard.
+3. Review the VitalScore, risk signals, food intelligence, movement intelligence, and day log.
+4. Open `Meals`, upload a food photo, analyze it, and save it to the log.
+5. Open `Movement`, add an activity or connect Strava.
+6. Use `Export PDF` to download the current report.
+7. Try the Coach tab with a question like: `Can I eat biryani tonight?`
+
+## Run Locally From The Repo
+
+Requirements: Python 3.11 or 3.12 is recommended.
 
 ```bash
+git clone https://github.com/rakshitvarma/vitallens.git
+cd vitallens
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-export GEMINI_API_KEY=your_ai_studio_key
-export DISABLE_FIRESTORE=1        # uses local JSON storage
-uvicorn app.main:app --port 8080
-# open http://localhost:8080
+export GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+export DISABLE_FIRESTORE=1
+uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
-## Deploy to Cloud Run (one command)
+Open:
+
+```text
+http://localhost:8080
+```
+
+PowerShell version:
+
+```powershell
+git clone https://github.com/rakshitvarma/vitallens.git
+cd vitallens
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+$env:GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+$env:DISABLE_FIRESTORE="1"
+uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+## Deploy To Google Cloud Run
+
+From Cloud Shell, inside the repo:
 
 ```bash
+cd ~/vitallens
+git pull
 gcloud run deploy vitallens \
   --source . \
   --region asia-south1 \
   --allow-unauthenticated \
-  --update-env-vars GEMINI_API_KEY=YOUR_KEY,STRAVA_CLIENT_ID=YOUR_ID,STRAVA_CLIENT_SECRET=YOUR_SECRET
+  --update-env-vars GEMINI_API_KEY='YOUR_GEMINI_API_KEY'
 ```
 
-Then set the public URL (needed for Strava OAuth redirects):
+If Strava sync is needed, include these variables too:
 
 ```bash
-gcloud run services update vitallens --region asia-south1 \
-  --update-env-vars PUBLIC_BASE_URL=https://YOUR-SERVICE-URL.run.app
+gcloud run services update vitallens \
+  --region asia-south1 \
+  --update-env-vars STRAVA_CLIENT_ID='YOUR_STRAVA_CLIENT_ID',STRAVA_CLIENT_SECRET='YOUR_STRAVA_CLIENT_SECRET',PUBLIC_BASE_URL='https://vitallens-s3cdt46tda-el.a.run.app'
 ```
 
-## Gemini key
+In the Strava developer settings, set the Authorization Callback Domain to:
 
-Gemini is required for meal-photo analysis, weekly insight, and coach chat. Add
-the real key only as an environment variable; never commit it to the repo.
-
-For Cloud Run:
-
-```bash
-gcloud run services update vitallens --region asia-south1 \
-  --update-env-vars GEMINI_API_KEY=YOUR_AI_STUDIO_KEY
+```text
+vitallens-s3cdt46tda-el.a.run.app
 ```
 
-For local PowerShell:
+## Environment Variables
 
-```powershell
-$env:GEMINI_API_KEY="YOUR_AI_STUDIO_KEY"
-uvicorn app.main:app --port 8080
+```text
+GEMINI_API_KEY=required for meal analysis, insights, and coach chat
+DISABLE_FIRESTORE=1 for local JSON storage
+STRAVA_CLIENT_ID=optional for Strava OAuth
+STRAVA_CLIENT_SECRET=optional for Strava OAuth
+PUBLIC_BASE_URL=required for Strava redirects in deployment
 ```
 
-If the key is missing, the app still loads, but Gemini actions return a setup
-message instead of a raw missing-key error.
+## Notes
 
-If Gemini returns a temporary high-demand error, the dashboard weekly insight
-falls back to a local score-based insight. Meal-photo analysis and coach chat
-show a short retry message because those responses require Gemini.
-
-## Sign-in
-
-Sign-in is disabled for the hackathon demo. The browser creates a local demo user
-id and sends it as `X-User-Id` on API calls.
-
-If the service previously had Google or Supabase auth variables, remove them:
-
-```bash
-gcloud run services update vitallens --region asia-south1 \
-  --remove-env-vars GOOGLE_CLIENT_ID,GOOGLE_OAUTH_CLIENT_ID,VITE_GOOGLE_CLIENT_ID,NEXT_PUBLIC_GOOGLE_CLIENT_ID,AUTH_PROVIDER,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_JWT_SECRET,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY
-```
-
-## Strava activity sync
-
-Set these Cloud Run environment variables:
-
-```bash
-gcloud run services update vitallens --region asia-south1 \
-  --update-env-vars STRAVA_CLIENT_ID=YOUR_ID,STRAVA_CLIENT_SECRET=YOUR_SECRET,PUBLIC_BASE_URL=https://YOUR-SERVICE-URL.run.app
-```
-
-In your Strava app settings (strava.com/settings/api), set **Authorization Callback Domain** to `YOUR-SERVICE-URL.run.app` (no https://, no path).
-
-The first **Connect Strava** click runs OAuth and imports the last 30 days of activities. The app stores Strava refresh tokens on the user record, so future **Re-sync Strava** clicks refresh the access token and pull the latest activities through `POST /api/strava/sync`. Strava activity IDs are saved as `strava-<id>`, so repeated syncs update existing activities instead of duplicating them.
-
-**Firestore:** create a database in *Native mode* in the same project (Console → Firestore → Create database). The Cloud Run default service account needs the *Cloud Datastore User* role (usually automatic). If Firestore is unreachable the app automatically falls back to local storage so the demo never breaks.
-
-**Using Vertex AI instead of an AI Studio key:** set `GOOGLE_GENAI_USE_VERTEXAI=true` and `GOOGLE_CLOUD_PROJECT=your-project` (and remove `GEMINI_API_KEY`).
-
-## Demo flow (for judges)
-
-1. Dashboard → **Load demo week** → VitalScore ring animates, risk signals + breakdown appear.
-2. Log Meal → upload a food photo, add portion note → **Analyze with Gemini** → itemized nutrition table → save.
-3. Dashboard → **Generate AI weekly insight** → Gemini coaching narrative referencing real numbers.
-4. Coach → ask "Can I eat biryani tonight?" — answer grounded in your own week.
-5. Community → anonymized ward-level pulse for city health stakeholders.
-
-## Responsible AI
-
-- Score arithmetic is fully rule-based and auditable (WHO/ICMR-aligned targets shown in UI); Gemini writes narratives, never the score.
-- Signals, not diagnoses — stated in the product.
-- Community view uses anonymized aggregates only; individual logs never leave the score engine.
-- Google Fit API is closed to new integrations (deprecated end-2026); roadmap targets Health Connect + Google Health API.
+- Sign-in is disabled for the hackathon demo. The app creates a local demo user in the browser.
+- Gemini generates nutrition estimates and coaching text. The score is rule-based and transparent.
+- VitalLens shows lifestyle signals, not medical diagnosis.
+- Firestore is used in Cloud Run when available; local development can use JSON storage with `DISABLE_FIRESTORE=1`.
 
 ## Stack
 
-Gemini 2.5 Flash · Vertex AI / AI Studio · Cloud Run · Firestore · FastAPI · Chart.js · Strava API
+FastAPI, Gemini, Google Cloud Run, Firestore, Chart.js, Strava API, HTML, CSS, JavaScript.
