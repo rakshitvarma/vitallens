@@ -708,7 +708,7 @@ $("btnSaveTargets").addEventListener("click",async()=>{
 
 let lastAnalysis=null;
 let lastAnalysisSource="photo";
-let mealAnalysisMode="photo";
+let mealAnalysisMode="text";
 let selectedMealFile=null;
 let previewUrl=null;
 const MAX_UPLOAD_BYTES=7_500_000;
@@ -813,7 +813,7 @@ $("btnSaveMeal").addEventListener("click",async()=>{
   await loadMeals();loadDashboard();$("mealList").scrollIntoView({behavior:"smooth",block:"start"});
 });
 
-setMealInputMode("photo");
+setMealInputMode("text");
 
 const renderMealItem=item=>`
   <div class="meal-log-item">
