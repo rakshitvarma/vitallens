@@ -33,10 +33,20 @@ const fmtDate=value=>{
 };
 const fmtDistance=m=>num(m)>=1000?`${round(num(m)/1000,1)} km`:`${Math.round(num(m))} m`;
 const toast=msg=>{const t=document.createElement("div");t.className="toast";t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2800);};
+const chartPalette=()=>document.body.dataset.theme==="dark"
+  ?{calories:"#b8e62e",caloriesBorder:"#d6ff65",burn:"#58d8f0",burnBorder:"#9eeeff",active:"#ffcf6b"}
+  :{calories:"#0b3d30",caloriesBorder:"#06261d",burn:"#007c9a",burnBorder:"#005c72",active:"#b35f00"};
 const applyChartTheme=()=>{
   if(!window.Chart)return;
-  Chart.defaults.color=document.body.dataset.theme==="dark"?"#cfe2d8":"#60756c";
-  Chart.defaults.borderColor=document.body.dataset.theme==="dark"?"rgba(255,255,255,.12)":"rgba(16,37,29,.10)";
+  Chart.defaults.color=document.body.dataset.theme==="dark"?"#d7eadf":"#233d32";
+  Chart.defaults.borderColor=document.body.dataset.theme==="dark"?"rgba(255,255,255,.16)":"rgba(13,59,46,.18)";
+  if(trendChart){
+    const palette=chartPalette();
+    const [calories,burn,active]=trendChart.data.datasets;
+    if(calories){calories.backgroundColor=palette.calories;calories.borderColor=palette.caloriesBorder;}
+    if(burn){burn.backgroundColor=palette.burn;burn.borderColor=palette.burnBorder;}
+    if(active){active.borderColor=palette.active;active.backgroundColor=palette.active;}
+  }
   trendChart?.update();
 };
 const setTheme=theme=>{
@@ -227,7 +237,12 @@ const focusIcon=name=>{
   };
   return `<span class="stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${icons[name]||icons.calories}</svg></span>`;
 };
-const focusStat=(value,label,icon)=>`<div class="stat">${focusIcon(icon)}<b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>`;
+const focusStat=(value,label,icon)=>`
+  <div class="stat focus-stat">
+    ${focusIcon(icon)}
+    <div class="focus-stat-text"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>
+  </div>
+`;
 const setFocusRing=(kind,score)=>{
   const value=pct(score);
   const ring=$(kind==="meal"?"mealRingFg":"activityRingFg");
@@ -432,24 +447,13 @@ const exportDashboardPdf=async()=>{
   pdfProgress(doc,42,y,150,"Calories balance",d.components?.calories||0,`${food.daily_avg.calories||0}/${round(targets.calories_per_day,0)} kcal`,pdfColor.lime2);
   pdfProgress(doc,222,y,150,"Sugar control",d.components?.sugar||0,`${food.daily_avg.sugar_g||0}/${round(targets.sugar_g_per_day,0)} g`,pdfColor.amber);
   pdfProgress(doc,402,y,130,"Sodium control",d.components?.sodium||0,`${food.daily_avg.sodium_mg||0}/${round(targets.sodium_mg_per_day,0)} mg`,pdfColor.coral);
-  y+=62;
-  const topFoods=(food.top_foods||[]).slice(0,4);
-  topFoods.forEach((item,i)=>pdfPill(doc,42+i*126,y,`${item.name} (${item.count}x)`,pdfColor.lime2));
-  y+=54;
+  y+=76;
   y=pdfSection(doc,"Movement intelligence",y);
   pdfProgress(doc,42,y,150,"Activity target",d.components?.activity||0,`${movement.active_minutes||0} active min`,pdfColor.sky);
   pdfProgress(doc,222,y,150,"Workout consistency",d.components?.consistency||0,`${movement.workouts||0} workouts`,pdfColor.lime2);
   pdfProgress(doc,402,y,130,"Calorie burn",Math.min(100,Math.round(num(movement.calories_burned)/1200*100)),`${movement.calories_burned||0} cal`,pdfColor.amber);
-  y+=62;
-  (movement.type_breakdown||[]).slice(0,4).forEach((item,i)=>pdfPill(doc,42+i*126,y,`${item.type}: ${item.minutes} min`,pdfColor.sky));
-  y+=54;
-  y=pdfSection(doc,"Risk signals and trend",y);
-  const signals=d.signals&&d.signals.length?d.signals:[{type:"none",level:"healthy",why:"No elevated risk signals."}];
-  signals.slice(0,3).forEach((s,i)=>{
-    const color=s.level==="elevated"?pdfColor.coral:s.level==="watch"?pdfColor.amber:pdfColor.lime2;
-    pdfPill(doc,42+i*164,y,String(s.type||"signal").replaceAll("_"," "),color);
-  });
-  y+=44;
+  y+=76;
+  y=pdfSection(doc,"Trend graph",y);
   try{
     const canvas=$("trendChart");
     if(canvas){
@@ -693,22 +697,27 @@ async function loadDashboard(withInsight=false){
     $("trendTitle").textContent=`${d.period?.label||"Period"} trend - intake vs movement`;
     $("dayLog").innerHTML=renderDayLog(d.day_log);
     trendChart?.destroy();
+    const palette=chartPalette();
     trendChart=new Chart($("trendChart"),{
       data:{
         labels:(d.trend||[]).map(t=>t.date.slice(5)),
         datasets:[
-          {type:"bar",label:"Calories",data:(d.trend||[]).map(t=>Math.round(t.calories)),backgroundColor:"#0E3B2E",borderRadius:6,yAxisID:"y"},
-          {type:"bar",label:"Calories burned",data:(d.trend||[]).map(t=>Math.round(t.calories_burned||0)),backgroundColor:"#1AA7C8",borderRadius:6,yAxisID:"y"},
-          {type:"line",label:"Active minutes",data:(d.trend||[]).map(t=>t.active_min),borderColor:"#8FBF10",backgroundColor:"#8FBF10",tension:.35,yAxisID:"y1"},
+          {type:"bar",label:"Calories",data:(d.trend||[]).map(t=>Math.round(t.calories)),backgroundColor:palette.calories,borderColor:palette.caloriesBorder,borderWidth:1,borderRadius:6,yAxisID:"y"},
+          {type:"bar",label:"Calories burned",data:(d.trend||[]).map(t=>Math.round(t.calories_burned||0)),backgroundColor:palette.burn,borderColor:palette.burnBorder,borderWidth:1,borderRadius:6,yAxisID:"y"},
+          {type:"line",label:"Active minutes",data:(d.trend||[]).map(t=>t.active_min),borderColor:palette.active,backgroundColor:palette.active,borderWidth:3,pointRadius:4,pointHoverRadius:5,tension:.3,yAxisID:"y1"},
         ],
       },
       options:{
         responsive:true,
-        plugins:{legend:{labels:{color:Chart.defaults.color}}},
+        maintainAspectRatio:false,
+        plugins:{
+          legend:{labels:{color:Chart.defaults.color,font:{weight:"700",size:12},boxWidth:14,boxHeight:10}},
+          tooltip:{backgroundColor:"#0d3b2e",titleColor:"#fff",bodyColor:"#fff",padding:10}
+        },
         scales:{
-          y:{position:"left",ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},
-          y1:{position:"right",ticks:{color:Chart.defaults.color},grid:{display:false}},
-          x:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},
+          y:{position:"left",ticks:{color:Chart.defaults.color,font:{weight:"700"}},grid:{color:Chart.defaults.borderColor,lineWidth:1.2}},
+          y1:{position:"right",ticks:{color:Chart.defaults.color,font:{weight:"700"}},grid:{display:false}},
+          x:{ticks:{color:Chart.defaults.color,font:{weight:"700"}},grid:{color:Chart.defaults.borderColor,lineWidth:1.2}},
         },
       },
     });

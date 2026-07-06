@@ -276,6 +276,10 @@ main{max-width:1120px;margin:0 auto;padding:24px 18px 64px}
 .card h3{font-size:1rem;line-height:1.25;margin-bottom:13px}
 .card .sub{color:var(--muted);font-size:.94rem;margin-bottom:15px}
 .card canvas{width:100%;max-width:100%}
+#trendChart{
+  height:260px !important;
+  min-height:240px;
+}
 .card-head{
   display:flex;
   align-items:flex-start;
@@ -464,16 +468,28 @@ body:not([data-theme=dark]) .export-btn:hover{
 .movement-focus .sub{color:#c8ddd3}
 .focus-hero .stat-row{margin-bottom:14px}
 .focus-hero .stat{
-  display:grid;
-  grid-template-columns:36px minmax(0,1fr);
-  grid-template-rows:auto auto;
-  gap:2px 10px;
+  display:flex;
   align-items:center;
-  align-content:center;
-  min-height:58px;
+  gap:12px;
+  min-height:66px;
+  padding:11px 12px;
 }
-.focus-hero .stat b{grid-column:2;font-size:1rem}
-.focus-hero .stat span:not(.stat-icon){grid-column:2}
+.focus-stat-text{
+  display:flex;
+  min-width:0;
+  flex:1;
+  flex-direction:column;
+  justify-content:center;
+}
+.focus-hero .stat b{
+  font-size:1rem;
+  line-height:1.12;
+  overflow-wrap:anywhere;
+}
+.focus-hero .stat span:not(.stat-icon){
+  line-height:1.25;
+  margin-top:4px;
+}
 .meal-focus .stat{
   background:rgba(184,230,46,.12);
   border-color:rgba(143,191,16,.22);
@@ -484,14 +500,12 @@ body:not([data-theme=dark]) .export-btn:hover{
   border-color:rgba(26,167,200,.24);
 }
 .stat-icon{
-  grid-row:1 / span 2;
-  width:36px;
-  height:36px;
+  flex:0 0 42px;
+  width:42px;
+  height:42px;
   display:flex;
   align-items:center;
   justify-content:center;
-  align-self:center;
-  justify-self:center;
   border-radius:8px;
   background:var(--accent-soft);
   color:var(--lime-2);
@@ -499,13 +513,15 @@ body:not([data-theme=dark]) .export-btn:hover{
 }
 .movement-focus .stat-icon{background:rgba(26,167,200,.18);color:#77d9ee}
 .stat-icon svg,.focus-icon-row svg{
-  width:18px;
-  height:18px;
+  display:block;
+  width:20px;
+  height:20px;
   fill:none;
   stroke:currentColor;
   stroke-width:2;
   stroke-linecap:round;
   stroke-linejoin:round;
+  overflow:visible;
 }
 .focus-icon-row{
   display:flex;
