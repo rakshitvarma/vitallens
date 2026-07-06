@@ -100,7 +100,7 @@ gcloud run deploy vitallens \
   --source . \
   --region asia-south1 \
   --allow-unauthenticated \
-  --update-env-vars GEMINI_API_KEY='YOUR_GEMINI_API_KEY'
+  --update-env-vars GEMINI_API_KEY='YOUR_GEMINI_API_KEY',AUTH_PROVIDER=firebase,ADMIN_EMAILS='you@example.com',FIREBASE_API_KEY='YOUR_FIREBASE_API_KEY',FIREBASE_AUTH_DOMAIN='vitallens-501613.firebaseapp.com',FIREBASE_PROJECT_ID='vitallens-501613',FIREBASE_APP_ID='YOUR_FIREBASE_APP_ID',FIREBASE_STORAGE_BUCKET='vitallens-501613.appspot.com',FIREBASE_MESSAGING_SENDER_ID='YOUR_SENDER_ID'
 ```
 
 If Strava sync is needed, include these variables too:
@@ -122,6 +122,14 @@ vitallens-s3cdt46tda-el.a.run.app
 ```text
 GEMINI_API_KEY=required for meal analysis, insights, and coach chat
 DISABLE_FIRESTORE=1 for local JSON storage
+AUTH_PROVIDER=firebase for Firebase Authentication; use AUTH_PROVIDER=demo only for local demo mode
+ADMIN_EMAILS=comma-separated admin emails that can view user metrics
+FIREBASE_API_KEY=Firebase web app API key
+FIREBASE_AUTH_DOMAIN=Firebase auth domain
+FIREBASE_PROJECT_ID=Firebase project id
+FIREBASE_APP_ID=Firebase web app id
+FIREBASE_STORAGE_BUCKET=Firebase storage bucket
+FIREBASE_MESSAGING_SENDER_ID=Firebase sender id
 STRAVA_CLIENT_ID=optional for Strava OAuth
 STRAVA_CLIENT_SECRET=optional for Strava OAuth
 PUBLIC_BASE_URL=required for Strava redirects in deployment
@@ -129,7 +137,8 @@ PUBLIC_BASE_URL=required for Strava redirects in deployment
 
 ## Notes
 
-- Sign-in is disabled for the public demo. The browser creates a local demo user id.
+- Sign-in uses Firebase Authentication / Google Cloud Identity Platform with Google and email/password providers.
+- Enable Google and Email/Password providers in Firebase Authentication, and add the Cloud Run domain plus localhost to authorized domains.
 - Gemini generates nutrition estimates and coaching text. VitalScore is computed by a rule-based scoring engine.
 - Firestore is used in Cloud Run when available; local development can use JSON storage with `DISABLE_FIRESTORE=1`.
 

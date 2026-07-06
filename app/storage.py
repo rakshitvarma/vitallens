@@ -105,6 +105,14 @@ def get_user(user_id: str) -> dict:
     return db.get("users", {}).get(user_id, {})
 
 
+def list_users() -> list[dict]:
+    if _use_firestore:
+        return [{**(snap.to_dict() or {}), "id": snap.id} for snap in _firestore.collection("users").stream()]
+    with _lock:
+        db = _load_local()
+    return [{**data, "id": user_id} for user_id, data in db.get("users", {}).items()]
+
+
 def set_user(user_id: str, data: dict) -> None:
     if _use_firestore:
         _firestore.collection("users").document(user_id).set(data, merge=True)

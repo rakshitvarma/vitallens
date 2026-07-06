@@ -10,10 +10,14 @@ from pydantic import BaseModel, Field
 
 from app import gemini_client, scoring, storage
 from app.auth import (
+    ADMIN_EMAILS,
     AUTH_CONFIG_ERROR,
     AUTH_CONFIGURED,
     AUTH_PROVIDER,
+    get_current_user,
     get_user_id,
+    list_auth_users,
+    require_admin,
 )
 
 app = FastAPI(title="VitalLens")
@@ -23,6 +27,15 @@ STRAVA_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8080")
 STRAVA_SCOPE = "activity:read_all"
 MAX_IMAGE_BYTES = 8_000_000
+FIREBASE_CONFIG = {
+    "apiKey": os.environ.get("FIREBASE_API_KEY", ""),
+    "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
+    "projectId": os.environ.get("FIREBASE_PROJECT_ID", os.environ.get("GOOGLE_CLOUD_PROJECT", "")),
+    "appId": os.environ.get("FIREBASE_APP_ID", ""),
+    "storageBucket": os.environ.get("FIREBASE_STORAGE_BUCKET", ""),
+    "messagingSenderId": os.environ.get("FIREBASE_MESSAGING_SENDER_ID", ""),
+    "measurementId": os.environ.get("FIREBASE_MEASUREMENT_ID", ""),
+}
 
 NUTRIENTS = ("calories", "protein_g", "carbs_g", "fat_g", "sugar_g", "fiber_g", "sodium_mg", "salt_g")
 DEFAULT_USER_TARGETS = {
@@ -316,13 +329,37 @@ def health(): return {"ok": True}
 
 @app.get("/api/config")
 def config():
+    firebase_required = ("apiKey", "authDomain", "projectId", "appId")
+    firebase_web_configured = all(FIREBASE_CONFIG.get(key) for key in firebase_required)
     return {
         "auth_provider": AUTH_PROVIDER,
         "gemini_enabled": gemini_client.is_configured(),
         "gemini_model": gemini_client.MODEL,
         "strava_enabled": bool(STRAVA_ID),
-        "auth_enabled": AUTH_CONFIGURED,
+        "auth_enabled": AUTH_CONFIGURED and (AUTH_PROVIDER == "demo" or firebase_web_configured),
         "auth_error": AUTH_CONFIG_ERROR,
+        "firebase_config": FIREBASE_CONFIG if firebase_web_configured else {},
+    }
+
+
+@app.post("/api/session")
+def session(current_user: dict=Depends(get_current_user)):
+    uid = current_user["uid"]
+    email = current_user.get("email", "")
+    user_doc = {
+        "email": email,
+        "display_name": current_user.get("name", ""),
+        "photo_url": current_user.get("picture", ""),
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+        "auth_provider": AUTH_PROVIDER,
+    }
+    storage.set_user(uid, user_doc)
+    return {
+        "uid": uid,
+        "email": email,
+        "display_name": user_doc["display_name"],
+        "photo_url": user_doc["photo_url"],
+        "is_admin": AUTH_PROVIDER == "demo" or email.lower() in ADMIN_EMAILS,
     }
 
 
@@ -611,6 +648,44 @@ async def sync_strava(days: int=30, user_id: str=Depends(get_user_id)):
     access=await _strava_access_token(user_id)
     imported=await _sync_strava_activities(user_id,access,days=days)
     return {"ok": True, "synced": imported, "last_sync_at": storage.get_user(user_id).get("strava_last_sync_at","")}
+
+
+@app.get("/api/admin/users")
+def admin_users(_: dict=Depends(require_admin)):
+    auth_users = {user["uid"]: user for user in list_auth_users()}
+    user_docs = {user["id"]: user for user in storage.list_users()}
+    meals = storage.all_docs("meals")
+    activities = storage.all_docs("activities")
+    user_ids = set(auth_users) | set(user_docs) | {m.get("user_id") for m in meals} | {a.get("user_id") for a in activities}
+    user_ids.discard(None)
+    rows = []
+    for uid in sorted(user_ids):
+        auth_user = auth_users.get(uid, {})
+        user_doc = user_docs.get(uid, {})
+        user_meals = [m for m in meals if m.get("user_id") == uid]
+        user_acts = [a for a in activities if a.get("user_id") == uid]
+        activity_dates = [
+            str(doc.get("created_at") or doc.get("date") or "")
+            for doc in [*user_meals, *user_acts]
+            if doc.get("created_at") or doc.get("date")
+        ]
+        rows.append({
+            "uid": uid,
+            "email": auth_user.get("email") or user_doc.get("email", ""),
+            "display_name": auth_user.get("display_name") or user_doc.get("display_name", ""),
+            "provider_ids": auth_user.get("provider_ids") or [],
+            "created_at": auth_user.get("created_at", ""),
+            "last_sign_in_at": auth_user.get("last_sign_in_at", ""),
+            "last_seen_at": user_doc.get("last_seen_at", ""),
+            "last_app_activity_at": max(activity_dates) if activity_dates else "",
+            "meal_count": len(user_meals),
+            "activity_count": len(user_acts),
+            "strava_connected": bool(user_doc.get("strava_connected") and user_doc.get("strava_refresh_token")),
+            "strava_last_sync_at": user_doc.get("strava_last_sync_at", ""),
+            "disabled": bool(auth_user.get("disabled", False)),
+        })
+    rows.sort(key=lambda row: row.get("last_seen_at") or row.get("last_sign_in_at") or row.get("created_at") or "", reverse=True)
+    return {"total": len(rows), "auth_provider": AUTH_PROVIDER, "users": rows}
 
 
 @app.get("/api/dashboard")

@@ -10,6 +10,9 @@ let editingMealId=null;
 let editingActivityId=null;
 let latestDashboard=null;
 const THEME_KEY="vitallens_theme";
+let _authMode="firebase";
+let _authClient=null;
+let _isAdmin=false;
 
 const $=id=>document.getElementById(id);
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[ch]));
@@ -89,9 +92,18 @@ const localId=()=>{
   }
 };
 
+const setAuthError=message=>{
+  const el=$("authError");
+  if(el)el.textContent=message||"";
+};
+const setAuthBusy=busy=>{
+  ["btnGoogleAuth","btnEmailSignIn","btnEmailSignUp"].forEach(id=>{const el=$(id);if(el)el.disabled=busy;});
+};
 const startGuestSession=()=>{
+  _authMode="demo";
   const id=localId();
-  _user={id,email:"dev@local",user_metadata:{full_name:"Demo User",avatar_url:""}};
+  _user={uid:id,email:"dev@local",displayName:"Demo User",photoURL:"",getIdToken:async()=>""};
+  _isAdmin=true;
   showApp();
 };
 
@@ -106,21 +118,73 @@ const handleReturnParams=()=>{
   }
 };
 
-async function initAuth(){startGuestSession();}
+async function initAuth(){
+  let cfg={};
+  try{
+    const res=await fetch("/api/config");
+    cfg=await res.json();
+  }catch(e){
+    setAuthError("Could not load authentication config.");
+    return;
+  }
+  _authMode=cfg.auth_provider||"firebase";
+  if(_authMode==="demo"){
+    startGuestSession();
+    return;
+  }
+  if(!cfg.auth_enabled||!cfg.firebase_config||!Object.keys(cfg.firebase_config).length){
+    setAuthError(`Authentication is not configured${cfg.auth_error?": "+cfg.auth_error:""}.`);
+    return;
+  }
+  if(!window.firebase?.auth){
+    setAuthError("Firebase SDK failed to load. Check network or CDN access.");
+    return;
+  }
+  if(!firebase.apps.length)firebase.initializeApp(cfg.firebase_config);
+  _authClient=firebase.auth();
+  await _authClient.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  _authClient.onAuthStateChanged(async user=>{
+    if(!user){
+      _user=null;
+      _isAdmin=false;
+      $("appShell").hidden=true;
+      $("authShell").hidden=false;
+      $("adminNav").hidden=true;
+      document.body.style.setProperty("--nav-count","5");
+      return;
+    }
+    _user=user;
+    try{
+      const session=await api("/api/session",{method:"POST"});
+      _isAdmin=!!session.is_admin;
+      showApp();
+    }catch(e){
+      setAuthError(e.message);
+      await _authClient.signOut();
+    }
+  });
+}
 
 function showApp(){
+  $("authShell").hidden=true;
   $("appShell").hidden=false;
   const u=_user;
-  $("userName").textContent=u.user_metadata?.full_name||u.email||"User";
+  $("userName").textContent=u.displayName||u.email||"User";
   const av=$("userAvatar");
-  if(u.user_metadata?.avatar_url){av.src=u.user_metadata.avatar_url;av.hidden=false;}
+  if(u.photoURL){av.src=u.photoURL;av.hidden=false;}else{av.hidden=true;}
+  $("adminNav").hidden=!_isAdmin;
+  document.body.style.setProperty("--nav-count",_isAdmin?"6":"5");
   loadDashboard();
   handleReturnParams();
 }
 
 const api=async(path,opts={})=>{
   const headers={...(opts.headers||{})};
-  headers["X-User-Id"]=_user?.id||"demo";
+  if(_authMode==="demo"){
+    headers["X-User-Id"]=_user?.uid||"demo";
+  }else if(_user){
+    headers.Authorization=`Bearer ${await _user.getIdToken()}`;
+  }
   const r=await fetch(path,{...opts,headers});
   if(!r.ok){
     const message=(await r.json().catch(()=>({}))).detail||r.statusText;
@@ -151,10 +215,50 @@ const activateTab=tab=>{
   if(tab==="meal"){loadDashboard();loadMeals();}
   if(tab==="activity"){loadDashboard();loadActivities();}
   if(tab==="community")loadCommunity();
+  if(tab==="admin")loadAdminUsers();
 };
 
 document.body.dataset.activeTab="dashboard";
 document.querySelectorAll("#nav button").forEach(b=>b.addEventListener("click",()=>activateTab(b.dataset.tab)));
+
+const authEmailPassword=async mode=>{
+  if(!_authClient)return setAuthError("Authentication is not ready.");
+  const email=$("authEmail").value.trim();
+  const password=$("authPassword").value;
+  if(!email||!password)return setAuthError("Enter email and password.");
+  setAuthBusy(true);setAuthError("");
+  try{
+    if(mode==="signup"){
+      await _authClient.createUserWithEmailAndPassword(email,password);
+    }else{
+      await _authClient.signInWithEmailAndPassword(email,password);
+    }
+  }catch(e){
+    setAuthError(e.message||"Authentication failed.");
+  }finally{
+    setAuthBusy(false);
+  }
+};
+const authGoogle=async()=>{
+  if(!_authClient)return setAuthError("Authentication is not ready.");
+  setAuthBusy(true);setAuthError("");
+  try{
+    const provider=new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({prompt:"select_account"});
+    await _authClient.signInWithPopup(provider);
+  }catch(e){
+    setAuthError(e.message||"Google sign-in failed.");
+  }finally{
+    setAuthBusy(false);
+  }
+};
+$("btnGoogleAuth").addEventListener("click",authGoogle);
+$("btnEmailSignIn").addEventListener("click",()=>authEmailPassword("signin"));
+$("btnEmailSignUp").addEventListener("click",()=>authEmailPassword("signup"));
+$("btnSignOut").addEventListener("click",async()=>{
+  if(_authMode==="demo"){location.reload();return;}
+  await _authClient?.signOut();
+});
 
 const nutritionFields=[
   ["calories","kcal","Calories",0],
@@ -1086,6 +1190,39 @@ $("chatMsg").addEventListener("keydown",e=>e.key==="Enter"&&sendChat());
 
 let wardA,wardR;
 async function loadCommunity(){const c=await api("/api/community");$("communityStats").innerHTML=[[c.platform_users,"active users"],[c.median_weekly_active_min+" min","median weekly activity"],[c.median_daily_sodium_mg+" mg","median daily sodium"],[c.median_daily_sugar_g+" g","median daily sugar"]].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");$("communityNote").textContent=c.note;const labels=c.wards.map(w=>w.ward);wardA?.destroy();wardR?.destroy();wardA=new Chart($("wardActive"),{type:"bar",data:{labels,datasets:[{label:"min/week",data:c.wards.map(w=>w.avg_active_min),backgroundColor:"#0E3B2E",borderRadius:6}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},y:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}}}}});wardR=new Chart($("wardRisk"),{type:"bar",data:{labels,datasets:[{label:"%",data:c.wards.map(w=>w.elevated_risk_pct),backgroundColor:"#D95245",borderRadius:6}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},y:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}}}}});}
+
+async function loadAdminUsers(){
+  if(!_isAdmin)return;
+  try{
+    const data=await api("/api/admin/users");
+    const users=data.users||[];
+    const connected=users.filter(u=>u.strava_connected).length;
+    $("adminSummary").innerHTML=renderMetricGrid([
+      {value:users.length,label:"users"},
+      {value:connected,label:"Strava connected"},
+      {value:users.reduce((sum,u)=>sum+num(u.meal_count),0),label:"meal logs"},
+      {value:users.reduce((sum,u)=>sum+num(u.activity_count),0),label:"activity logs"},
+    ]);
+    $("adminUsers").innerHTML=`
+      <table>
+        <thead><tr><th>User</th><th>Providers</th><th>Signed in</th><th>App activity</th><th>Logs</th><th>Strava</th></tr></thead>
+        <tbody>${users.map(u=>`
+          <tr>
+            <td><b>${escapeHtml(u.display_name||u.email||u.uid)}</b><span>${escapeHtml(u.email||u.uid)}</span></td>
+            <td>${escapeHtml((u.provider_ids||[]).join(", ")||"-")}</td>
+            <td>${escapeHtml(u.last_sign_in_at?new Date(u.last_sign_in_at).toLocaleString():"-")}<span>Created ${escapeHtml(u.created_at?new Date(u.created_at).toLocaleDateString():"-")}</span></td>
+            <td>${escapeHtml(u.last_seen_at?new Date(u.last_seen_at).toLocaleString():"-")}<span>${escapeHtml(u.last_app_activity_at||"")}</span></td>
+            <td>${escapeHtml(u.meal_count)} meals<br/>${escapeHtml(u.activity_count)} activities</td>
+            <td>${u.strava_connected?"Connected":"Not connected"}<span>${escapeHtml(u.strava_last_sync_at||"")}</span></td>
+          </tr>
+        `).join("")}</tbody>
+      </table>
+    `;
+  }catch(e){
+    $("adminUsers").innerHTML=`<p class="auth-error">${escapeHtml(e.message)}</p>`;
+  }
+}
+$("btnRefreshAdmin").addEventListener("click",loadAdminUsers);
 
 $("actType").innerHTML=activityTypeOptions.map(([key,label])=>`<option value="${key}">${escapeHtml(label)}</option>`).join("");
 initTheme();
