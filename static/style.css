@@ -382,7 +382,7 @@ main{max-width:1120px;margin:0 auto;padding:24px 18px 64px;position:relative}
 
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .card{
-  background:color-mix(in srgb,var(--surface) 90%,white 10%);
+  background:#fcf3e4;
   border:1px solid var(--line);
   border-radius:var(--radius);
   box-shadow:var(--soft-shadow);
@@ -394,7 +394,7 @@ main{max-width:1120px;margin:0 auto;padding:24px 18px 64px;position:relative}
 .card:hover{transform:translateY(-2px);box-shadow:var(--shadow);border-color:var(--card-hover)}
 body[data-active-tab=dashboard] .card{
   background:
-    linear-gradient(145deg,color-mix(in srgb,var(--surface) 92%,white 8%),color-mix(in srgb,var(--surface-soft) 86%,white 14%));
+    linear-gradient(145deg,#fcf3e4,#f3e3ca);
 }
 body[data-active-tab=meal] .card{
   background:
@@ -423,6 +423,11 @@ body[data-theme=dark][data-active-tab=activity] .card{
 }
 .pdf-export-mode .intelligence-grid .mini-list{
   display:none !important;
+}
+.pdf-export-mode .intelligence-grid .card{
+  background:#fbf0de !important;
+  border-color:#d3bd9a !important;
+  box-shadow:none !important;
 }
 .card h2{font-size:1.32rem;line-height:1.2;margin-bottom:5px}
 .card h3{font-size:1rem;line-height:1.25;margin-bottom:13px}
