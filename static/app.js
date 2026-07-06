@@ -334,6 +334,16 @@ const pdfRgb=(doc,color)=>doc.setTextColor(...color);
 const pdfFill=(doc,color)=>doc.setFillColor(...color);
 const pdfStroke=(doc,color)=>doc.setDrawColor(...color);
 const pdfScoreColor=score=>score>=70?pdfColor.lime:score>=45?pdfColor.amber:pdfColor.coral;
+const pdfFitText=(doc,text,x,y,maxWidth,{size=12,minSize=7,align="left"}={})=>{
+  const value=String(text);
+  let fontSize=size;
+  doc.setFontSize(fontSize);
+  while(fontSize>minSize&&doc.getTextWidth(value)>maxWidth){
+    fontSize-=.5;
+    doc.setFontSize(fontSize);
+  }
+  doc.text(value,x,y,{maxWidth,align});
+};
 const pdfAddPageIfNeeded=(doc,y,needed=120)=>{
   if(y+needed>760){doc.addPage();return 44;}
   return y;
@@ -350,9 +360,10 @@ const pdfMetricCard=(doc,x,y,w,label,value,accent=pdfColor.lime)=>{
   doc.roundedRect(x,y,w,54,8,8,"FD");
   pdfFill(doc,accent);doc.roundedRect(x,y,5,54,8,8,"F");
   doc.setFont("helvetica","bold");doc.setFontSize(13);pdfRgb(doc,pdfColor.ink);
-  doc.text(String(value),x+14,y+22,{maxWidth:w-20});
+  pdfFitText(doc,value,x+14,y+22,w-22,{size:13,minSize:8});
   doc.setFont("helvetica","normal");doc.setFontSize(8);pdfRgb(doc,pdfColor.muted);
-  doc.text(label,x+14,y+39,{maxWidth:w-20});
+  const labelLines=doc.splitTextToSize(String(label),w-22).slice(0,2);
+  doc.text(labelLines,x+14,y+38);
 };
 const pdfProgress=(doc,x,y,w,label,value,detail,accent=pdfColor.lime2)=>{
   const score=pct(value);
@@ -369,7 +380,8 @@ const pdfPill=(doc,x,y,label,color=pdfColor.lime2)=>{
   doc.roundedRect(x,y,112,24,7,7,"FD");
   pdfFill(doc,color);doc.circle(x+13,y+12,4,"F");
   doc.setFont("helvetica","bold");doc.setFontSize(8);pdfRgb(doc,pdfColor.ink);
-  doc.text(label,x+24,y+15,{maxWidth:82});
+  const lines=doc.splitTextToSize(String(label),82).slice(0,2);
+  doc.text(lines,x+24,y+10);
 };
 const pdfTrendFallback=(doc,d,x,y,w,h)=>{
   const rows=d.trend||[];
@@ -411,10 +423,10 @@ const exportDashboardPdf=async()=>{
   doc.text(dashboardPeriod==="month"?"Your month, summarized.":"Your week, summarized.",200,74);
   doc.setFont("helvetica","normal");doc.setFontSize(11);pdfRgb(doc,[210,230,220]);
   doc.text(`${period}: meals, movement and risk signals scored transparently.`,200,96,{maxWidth:325});
-  pdfMetricCard(doc,200,118,68,"kcal/day",food.daily_avg.calories||0,pdfColor.lime);
-  pdfMetricCard(doc,278,118,68,"active min",movement.active_minutes||0,pdfColor.sky);
-  pdfMetricCard(doc,356,118,68,"sugar/day",`${food.daily_avg.sugar_g||0}g`,pdfColor.amber);
-  pdfMetricCard(doc,434,118,82,"sodium/day",`${food.daily_avg.sodium_mg||0}mg`,pdfColor.coral);
+  pdfMetricCard(doc,200,118,78,"kcal/day",food.daily_avg.calories||0,pdfColor.lime);
+  pdfMetricCard(doc,286,118,78,"active min",movement.active_minutes||0,pdfColor.sky);
+  pdfMetricCard(doc,372,118,78,"sugar/day",`${food.daily_avg.sugar_g||0}g`,pdfColor.amber);
+  pdfMetricCard(doc,458,118,78,"sodium/day",`${food.daily_avg.sodium_mg||0}mg`,pdfColor.coral);
   let y=234;
   y=pdfSection(doc,"Food intelligence",y);
   pdfProgress(doc,42,y,150,"Calories balance",d.components?.calories||0,`${food.daily_avg.calories||0}/${round(targets.calories_per_day,0)} kcal`,pdfColor.lime2);
@@ -443,7 +455,17 @@ const exportDashboardPdf=async()=>{
     if(canvas){
       const img=canvas.toDataURL("image/png",1);
       pdfFill(doc,[255,255,255]);pdfStroke(doc,pdfColor.line);doc.roundedRect(40,y,515,158,8,8,"FD");
-      doc.addImage(img,"PNG",56,y+16,483,112);
+      const frame={x:56,y:y+16,w:483,h:112};
+      const canvasRatio=canvas.width&&canvas.height?canvas.width/canvas.height:frame.w/frame.h;
+      const frameRatio=frame.w/frame.h;
+      let drawW=frame.w;
+      let drawH=frame.h;
+      if(canvasRatio>frameRatio){
+        drawH=frame.w/canvasRatio;
+      }else{
+        drawW=frame.h*canvasRatio;
+      }
+      doc.addImage(img,"PNG",frame.x+(frame.w-drawW)/2,frame.y+(frame.h-drawH)/2,drawW,drawH);
       doc.setFont("helvetica","bold");doc.setFontSize(9);pdfRgb(doc,pdfColor.ink);
       doc.text("Trend - calories, calories burned and active minutes",56,y+142);
     }else{
