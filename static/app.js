@@ -140,7 +140,6 @@ const activateTab=tab=>{
   if(tab==="meal"){loadDashboard();loadMeals();}
   if(tab==="activity"){loadDashboard();loadActivities();}
   if(tab==="community")loadCommunity();
-  window.scrollTo({top:0,behavior:"smooth"});
 };
 
 document.body.dataset.activeTab="dashboard";
