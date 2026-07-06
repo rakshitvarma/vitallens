@@ -1,28 +1,167 @@
 /* VitalLens SPA */
 let _supabase=null,_user=null,_token=null;
+let _stravaConnected=false;
+
+const redirectMessage=()=>{
+  const query=new URLSearchParams(location.search);
+  const hash=new URLSearchParams((location.hash||"").replace(/^#/,""));
+  return query.get("error_description")||hash.get("error_description")||query.get("error")||hash.get("error")||"";
+};
+
+const cleanAuthUrl=()=>{
+  const params=new URLSearchParams(location.search);
+  const before=params.toString();
+  ["error","error_description","error_code"].forEach(k=>params.delete(k));
+  const after=params.toString();
+  if(location.hash||before!==after) window.history.replaceState({},"","/"+(after?`?${after}`:""));
+};
+
+const showAuthScreen=(message="")=>{
+  document.getElementById("authScreen").hidden=false;
+  document.getElementById("appShell").hidden=true;
+  const errorEl=document.getElementById("authError");
+  if(errorEl){
+    errorEl.textContent=message;
+    errorEl.hidden=!message;
+  }
+};
+
+const startGuestSession=()=>{
+  const id=localStorage.getItem("vl_uid")||(()=>{const i=crypto.randomUUID();localStorage.setItem("vl_uid",i);return i;})();
+  _token=null;
+  _user={id,email:"dev@local",user_metadata:{full_name:"Demo User",avatar_url:""}};
+  showApp();
+};
+
+const handleReturnParams=()=>{
+  const sp=new URLSearchParams(location.search);
+  if(sp.get("strava")==="ok") toast(`Strava synced ${sp.get("synced")||"latest"} activities`);
+  if(sp.get("strava")==="scope") toast("Strava needs activity read permission");
+  if(sp.get("strava")==="error") toast("Strava sync failed");
+  if(sp.has("strava")){
+    ["strava","synced"].forEach(k=>sp.delete(k));
+    window.history.replaceState({},"","/"+(sp.toString()?`?${sp}`:""));
+  }
+};
+
+const parseJwtPayload=(token)=>{
+  const base64Url=(token.split(".")[1]||"").replace(/-/g,"+").replace(/_/g,"/");
+  const padded=base64Url+"=".repeat((4-base64Url.length%4)%4);
+  const bytes=Uint8Array.from(atob(padded),c=>c.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+};
+const isJwtExpired=(token)=>{
+  try{return ((parseJwtPayload(token).exp||0)*1000)<Date.now()+60000;}
+  catch{return true;}
+};
+
+const waitForGoogle=()=>new Promise(resolve=>{
+  if(window.google?.accounts?.id) return resolve(true);
+  let attempts=0;
+  const timer=setInterval(()=>{
+    if(window.google?.accounts?.id){clearInterval(timer);resolve(true);}
+    else if(++attempts>50){clearInterval(timer);resolve(false);}
+  },100);
+});
+
+async function initGoogleAuth(clientId){
+  const savedToken=sessionStorage.getItem("vl_google_token");
+  const savedUser=sessionStorage.getItem("vl_google_user");
+  if(savedToken&&savedUser&&!isJwtExpired(savedToken)){
+    _token="google:"+savedToken;
+    _user=JSON.parse(savedUser);
+    showApp();
+    return;
+  }
+  sessionStorage.removeItem("vl_google_token");
+  sessionStorage.removeItem("vl_google_user");
+  showAuthScreen();
+  document.getElementById("btnGoogleLogin").hidden=true;
+  const host=document.getElementById("googleButton");
+  host.hidden=false;
+  host.innerHTML="";
+  if(!(await waitForGoogle())){
+    showAuthScreen("Google sign-in client failed to load. Check the network and refresh.");
+    return;
+  }
+  window.google.accounts.id.initialize({
+    client_id:clientId,
+    callback:response=>{
+      if(!response.credential){
+        showAuthScreen("Google did not return a sign-in credential.");
+        return;
+      }
+      const claims=parseJwtPayload(response.credential);
+      _token="google:"+response.credential;
+      _user={
+        id:"google:"+claims.sub,
+        email:claims.email,
+        user_metadata:{full_name:claims.name||claims.email||"User",avatar_url:claims.picture||""}
+      };
+      sessionStorage.setItem("vl_google_token",response.credential);
+      sessionStorage.setItem("vl_google_user",JSON.stringify(_user));
+      cleanAuthUrl();
+      showApp();
+    },
+    ux_mode:"popup",
+    use_fedcm_for_prompt:true
+  });
+  window.google.accounts.id.renderButton(host,{theme:"outline",size:"large",text:"continue_with",shape:"pill",width:320});
+  window.google.accounts.id.prompt();
+}
 
 async function initAuth(){
   let cfg={};
-  try{ cfg=await fetch("/api/config").then(r=>r.json()); }catch(e){}
-  if(!cfg.supabase_url){
-    const id=localStorage.getItem("vl_uid")||(()=>{const i=crypto.randomUUID();localStorage.setItem("vl_uid",i);return i;})();
-    _user={id,email:"dev@local",user_metadata:{full_name:"Dev User",avatar_url:""}};
-    showApp(); return;
+  try{ cfg=await fetch("/api/config").then(r=>r.json()); }
+  catch(e){
+    showAuthScreen("Could not load app configuration. Please refresh and try again.");
+    return;
   }
-  _supabase=window.supabase.createClient(cfg.supabase_url,cfg.supabase_anon_key);
-  const{data:{session}}=await _supabase.auth.getSession();
-  if(session){_token=session.access_token;_user=session.user;showApp();
-    _supabase.auth.onAuthStateChange((_e,s)=>{if(s){_token=s.access_token;_user=s.user;}});
+  if(cfg.auth_partial){
+    showAuthScreen(cfg.auth_error||"Supabase auth is partially configured.");
+    document.getElementById("btnGoogleLogin").disabled=true;
+    return;
+  }
+  if(cfg.auth_provider==="google"){
+    await initGoogleAuth(cfg.google_client_id);
+    return;
+  }
+  if(!cfg.auth_enabled){
+    startGuestSession();
+    return;
+  }
+  if(!window.supabase){
+    showAuthScreen("Supabase client failed to load. Check the network and refresh.");
+    return;
+  }
+  const loginError=redirectMessage();
+  _supabase=window.supabase.createClient(cfg.supabase_url,cfg.supabase_anon_key,{
+    auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+  });
+  _supabase.auth.onAuthStateChange((_e,s)=>{
+    _token=s?.access_token||null;
+    _user=s?.user||null;
+    if(s&&document.getElementById("appShell").hidden) showApp();
+  });
+  const{data:{session},error}=await _supabase.auth.getSession();
+  if(error){
+    showAuthScreen(error.message);
+    return;
+  }
+  if(session){
+    _token=session.access_token;_user=session.user;cleanAuthUrl();showApp();
   } else {
-    document.getElementById("authScreen").hidden=false;
-    document.getElementById("appShell").hidden=true;
+    showAuthScreen(loginError);
+    if(loginError) cleanAuthUrl();
+    document.getElementById("btnGoogleLogin").disabled=false;
     document.getElementById("btnGoogleLogin").onclick=async()=>{
-      await _supabase.auth.signInWithOAuth({provider:"google",options:{redirectTo:location.origin+"/"}});
+      const{error}=await _supabase.auth.signInWithOAuth({
+        provider:"google",
+        options:{redirectTo:location.origin+"/"}
+      });
+      if(error) showAuthScreen(error.message);
     };
   }
-  const sp=new URLSearchParams(location.search);
-  if(sp.get("strava")==="ok") toast("Strava synced ✓");
-  if(sp.has("strava")) history.replaceState({},"","/");
 }
 
 function showApp(){
@@ -32,8 +171,15 @@ function showApp(){
   document.getElementById("userName").textContent=u.user_metadata?.full_name||u.email||"User";
   const av=document.getElementById("userAvatar");
   if(u.user_metadata?.avatar_url){av.src=u.user_metadata.avatar_url;av.hidden=false;}
-  document.getElementById("btnSignOut").onclick=async()=>{if(_supabase)await _supabase.auth.signOut();location.reload();};
+  document.getElementById("btnSignOut").onclick=async()=>{
+    if(_supabase) await _supabase.auth.signOut();
+    sessionStorage.removeItem("vl_google_token");
+    sessionStorage.removeItem("vl_google_user");
+    window.google?.accounts?.id?.disableAutoSelect();
+    location.reload();
+  };
   loadDashboard();
+  handleReturnParams();
 }
 
 const api=async(path,opts={})=>{
@@ -72,7 +218,8 @@ async function loadDashboard(withInsight=false){
     trendChart?.destroy();
     trendChart=new Chart($("trendChart"),{data:{labels:d.trend.map(t=>t.date.slice(5)),datasets:[{type:"bar",label:"Calories",data:d.trend.map(t=>Math.round(t.calories)),backgroundColor:"#0E3B2E",borderRadius:6,yAxisID:"y"},{type:"line",label:"Active minutes",data:d.trend.map(t=>t.active_min),borderColor:"#8FBF10",backgroundColor:"#8FBF10",tension:.35,yAxisID:"y1"}]},options:{scales:{y:{position:"left"},y1:{position:"right",grid:{display:false}}}}});
     if(d.insight){$("insightCard").hidden=false;$("insightText").textContent=d.insight;}
-    $("stravaStatus").textContent=d.strava_connected?"Strava connected ✓":"";
+    _stravaConnected=!!d.strava_connected;
+    $("stravaStatus").textContent=d.strava_connected?`Strava connected${d.strava_last_sync_at?" - last sync "+new Date(d.strava_last_sync_at).toLocaleString():""}`:"";
     $("btnStrava").textContent=d.strava_connected?"Re-sync Strava":"Connect Strava";
   }catch(e){toast("Dashboard: "+e.message);}
 }
@@ -100,11 +247,28 @@ async function loadMeals(){const m=await api("/api/meals?days=7");$("mealList").
 
 $("btnSaveAct").addEventListener("click",async()=>{await api("/api/activities",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:$("actType").value,minutes:+$("actMin").value,intensity:$("actIntensity").value})});toast("Activity added");loadActivities();});
 async function loadActivities(){const a=await api("/api/activities?days=7");$("actList").innerHTML=a.slice(-14).reverse().map(a=>`<div class="rowitem"><div><b style="text-transform:capitalize">${a.type}</b><div class="meta">${a.date} · ${a.source}</div></div><div>${a.minutes} min</div></div>`).join("")||"<p class='sub'>Nothing logged.</p>";}
-$("btnStrava").addEventListener("click",async()=>{try{const{url}=await api("/auth/strava/login");location.href=url;}catch(e){toast(e.message);}});
+$("btnStrava").addEventListener("click",async()=>{
+  const b=$("btnStrava");b.disabled=true;
+  try{
+    if(_stravaConnected){
+      b.textContent="Syncing Strava...";
+      const res=await api("/api/strava/sync",{method:"POST"});
+      toast(`Strava synced ${res.synced} activities`);
+      await loadDashboard();
+      await loadActivities();
+    }else{
+      const{url}=await api("/auth/strava/login");
+      location.href=url;
+      return;
+    }
+  }catch(e){toast(e.message);}
+  b.disabled=false;
+  b.textContent=_stravaConnected?"Re-sync Strava":"Connect Strava";
+});
 
-const history=[];
+const chatHistory=[];
 function bubble(role,text){const b=document.createElement("div");b.className="bubble "+(role==="user"?"user":"bot");b.textContent=text;$("chatLog").appendChild(b);$("chatLog").scrollTop=1e6;return b;}
-async function sendChat(){const msg=$("chatMsg").value.trim();if(!msg)return;$("chatMsg").value="";bubble("user",msg);const t=bubble("bot","…");try{const{reply}=await api("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg,history})});t.textContent=reply;history.push({role:"user",text:msg},{role:"model",text:reply});}catch(e){t.textContent="Error: "+e.message;}}
+async function sendChat(){const msg=$("chatMsg").value.trim();if(!msg)return;$("chatMsg").value="";bubble("user",msg);const t=bubble("bot","…");try{const{reply}=await api("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg,history:chatHistory})});t.textContent=reply;chatHistory.push({role:"user",text:msg},{role:"model",text:reply});}catch(e){t.textContent="Error: "+e.message;}}
 $("btnChat").addEventListener("click",sendChat);
 $("chatMsg").addEventListener("keydown",e=>e.key==="Enter"&&sendChat());
 

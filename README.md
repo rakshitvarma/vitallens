@@ -45,7 +45,62 @@ gcloud run services update vitallens --region asia-south1 \
   --update-env-vars PUBLIC_BASE_URL=https://YOUR-SERVICE-URL.run.app
 ```
 
+## Google sign-in
+
+Preferred setup for this hackathon app: use Google Identity Services directly.
+This avoids Supabase redirect/callback configuration entirely.
+
+```bash
+gcloud run services update vitallens --region asia-south1 \
+  --update-env-vars GOOGLE_CLIENT_ID=YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com
+```
+
+In the Google Cloud Console OAuth client, add:
+
+- Authorized JavaScript origin: `https://YOUR-SERVICE-URL.run.app`
+
+The browser receives a Google ID token and the API verifies it server-side against
+`GOOGLE_CLIENT_ID`. The user id stored in Firestore/local JSON is `google:<sub>`,
+where `sub` is Google's stable account identifier.
+
+### Supabase Auth alternative
+
+The app uses Supabase Auth as the Google sign-in broker. Cloud Run must expose
+both public Supabase browser values to the SPA:
+
+```bash
+gcloud run services update vitallens --region asia-south1 \
+  --update-env-vars SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co,SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY
+```
+
+`SUPABASE_JWT_SECRET` is optional. If it is absent, the API verifies the browser's
+Supabase access token against Supabase Auth. If only `SUPABASE_JWT_SECRET` is set
+without `SUPABASE_URL` and `SUPABASE_ANON_KEY`, the app intentionally falls back
+to demo mode instead of showing `Dashboard: Missing Authorization header`.
+
+Configure the provider allowlists:
+
+1. Supabase Dashboard -> Authentication -> URL Configuration:
+   - Site URL: `https://YOUR-SERVICE-URL.run.app`
+   - Redirect URL: `https://YOUR-SERVICE-URL.run.app/`
+2. Supabase Dashboard -> Authentication -> Providers -> Google:
+   - Enable Google and paste the Google OAuth Client ID and Client Secret.
+3. Google Cloud Console -> APIs & Services -> Credentials -> OAuth client:
+   - Authorized JavaScript origin: `https://YOUR-SERVICE-URL.run.app`
+   - Authorized redirect URI: `https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`
+
+## Strava activity sync
+
+Set these Cloud Run environment variables:
+
+```bash
+gcloud run services update vitallens --region asia-south1 \
+  --update-env-vars STRAVA_CLIENT_ID=YOUR_ID,STRAVA_CLIENT_SECRET=YOUR_SECRET,PUBLIC_BASE_URL=https://YOUR-SERVICE-URL.run.app
+```
+
 In your Strava app settings (strava.com/settings/api), set **Authorization Callback Domain** to `YOUR-SERVICE-URL.run.app` (no https://, no path).
+
+The first **Connect Strava** click runs OAuth and imports the last 30 days of activities. The app stores Strava refresh tokens on the user record, so future **Re-sync Strava** clicks refresh the access token and pull the latest activities through `POST /api/strava/sync`. Strava activity IDs are saved as `strava-<id>`, so repeated syncs update existing activities instead of duplicating them.
 
 **Firestore:** create a database in *Native mode* in the same project (Console → Firestore → Create database). The Cloud Run default service account needs the *Cloud Datastore User* role (usually automatic). If Firestore is unreachable the app automatically falls back to local storage so the demo never breaks.
 

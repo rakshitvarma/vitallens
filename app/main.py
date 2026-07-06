@@ -1,25 +1,46 @@
-import os, random, statistics
+import base64, hashlib, hmac, json, os, random, statistics
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from app import gemini_client, scoring, storage
-from app.auth import get_user_id
+from app.auth import (
+    AUTH_CONFIG_ERROR,
+    AUTH_CONFIGURED,
+    AUTH_PARTIAL,
+    AUTH_PROVIDER,
+    GOOGLE_CLIENT_ID,
+    SUPABASE_ANON_KEY,
+    SUPABASE_CONFIGURED,
+    SUPABASE_URL,
+    get_user_id,
+)
 
 app = FastAPI(title="VitalLens")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 STRAVA_ID = os.environ.get("STRAVA_CLIENT_ID", "")
 STRAVA_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8080")
+STRAVA_SCOPE = "activity:read_all"
 
 @app.get("/api/health")
 def health(): return {"ok": True}
 
 @app.get("/api/config")
 def config():
-    return {"supabase_url": os.environ.get("SUPABASE_URL",""), "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY",""), "strava_enabled": bool(STRAVA_ID), "auth_enabled": bool(os.environ.get("SUPABASE_JWT_SECRET"))}
+    return {
+        "auth_provider": AUTH_PROVIDER,
+        "google_client_id": GOOGLE_CLIENT_ID if AUTH_PROVIDER == "google" else "",
+        "supabase_url": SUPABASE_URL if AUTH_PROVIDER == "supabase" and SUPABASE_CONFIGURED else "",
+        "supabase_anon_key": SUPABASE_ANON_KEY if AUTH_PROVIDER == "supabase" and SUPABASE_CONFIGURED else "",
+        "strava_enabled": bool(STRAVA_ID),
+        "auth_enabled": AUTH_CONFIGURED,
+        "auth_partial": AUTH_PARTIAL,
+        "auth_error": AUTH_CONFIG_ERROR,
+    }
 
 @app.post("/api/meals/analyze")
 async def analyze_meal(image: UploadFile=File(...), portion_note: str=Form(""), user_id: str=Depends(get_user_id)):
@@ -57,22 +78,124 @@ def list_activities(days: int=7, user_id: str=Depends(get_user_id)):
 
 @app.get("/auth/strava/login")
 def strava_login(user_id: str=Depends(get_user_id)):
-    if not STRAVA_ID: raise HTTPException(501, "Strava not configured")
+    if not STRAVA_ID or not STRAVA_SECRET: raise HTTPException(501, "Strava not configured")
     redirect=f"{PUBLIC_BASE_URL.rstrip('/')}/auth/strava/callback"
-    return {"url": f"https://www.strava.com/oauth/authorize?client_id={STRAVA_ID}&response_type=code&redirect_uri={redirect}&approval_prompt=auto&scope=activity:read_all&state={user_id}"}
+    params={
+        "client_id": STRAVA_ID,
+        "response_type": "code",
+        "redirect_uri": redirect,
+        "approval_prompt": "auto",
+        "scope": STRAVA_SCOPE,
+        "state": _encode_strava_state(user_id),
+    }
+    return {"url": f"https://www.strava.com/oauth/authorize?{urlencode(params)}"}
+
+def _encode_strava_state(user_id: str) -> str:
+    payload=base64.urlsafe_b64encode(json.dumps({"u":user_id,"iat":int(datetime.now(timezone.utc).timestamp())},separators=(",",":")).encode()).decode().rstrip("=")
+    sig=hmac.new(STRAVA_SECRET.encode(),payload.encode(),hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+def _decode_strava_state(state: str) -> str:
+    try:
+        payload,sig=state.split(".",1)
+        expected=hmac.new(STRAVA_SECRET.encode(),payload.encode(),hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig,expected): return ""
+        data=json.loads(base64.urlsafe_b64decode(payload+"="*((4-len(payload)%4)%4)).decode())
+        if int(datetime.now(timezone.utc).timestamp())-int(data.get("iat",0))>1800: return ""
+        return str(data.get("u") or "")
+    except Exception:
+        return ""
+
+def _store_strava_tokens(user_id: str, token_data: dict, scope: str="") -> None:
+    current=storage.get_user(user_id)
+    storage.set_user(user_id,{
+        "strava_connected": True,
+        "strava_access_token": token_data.get("access_token") or current.get("strava_access_token",""),
+        "strava_refresh_token": token_data.get("refresh_token") or current.get("strava_refresh_token",""),
+        "strava_expires_at": int(token_data.get("expires_at") or current.get("strava_expires_at") or 0),
+        "strava_scope": scope or token_data.get("scope") or current.get("strava_scope",""),
+        "strava_athlete_id": str((token_data.get("athlete") or {}).get("id") or current.get("strava_athlete_id","")),
+    })
+
+async def _strava_access_token(user_id: str) -> str:
+    user=storage.get_user(user_id)
+    refresh=user.get("strava_refresh_token")
+    access=user.get("strava_access_token")
+    expires_at=int(user.get("strava_expires_at") or 0)
+    if not refresh:
+        raise HTTPException(409, "Connect Strava first")
+    if access and expires_at > int(datetime.now(timezone.utc).timestamp())+300:
+        return access
+    async with httpx.AsyncClient(timeout=15) as hx:
+        resp=await hx.post("https://www.strava.com/oauth/token",data={"client_id":STRAVA_ID,"client_secret":STRAVA_SECRET,"grant_type":"refresh_token","refresh_token":refresh})
+    if resp.status_code==401:
+        storage.set_user(user_id,{"strava_connected":False})
+        raise HTTPException(401, "Strava authorization expired. Connect Strava again.")
+    if resp.status_code!=200:
+        raise HTTPException(502, f"Strava token refresh failed ({resp.status_code})")
+    token_data=resp.json()
+    _store_strava_tokens(user_id,token_data,user.get("strava_scope",""))
+    return token_data["access_token"]
+
+def _activity_from_strava(user_id: str, activity: dict) -> dict:
+    start=str(activity.get("start_date_local") or activity.get("start_date") or "")[:10]
+    avg_hr=float(activity.get("average_heartrate") or 0)
+    return {
+        "id": f"strava-{activity['id']}",
+        "user_id": user_id,
+        "date": start or datetime.now(timezone.utc).date().isoformat(),
+        "type": str(activity.get("sport_type") or activity.get("type") or "workout").replace("_"," ").lower(),
+        "minutes": round(float(activity.get("moving_time") or activity.get("elapsed_time") or 0)/60,1),
+        "intensity": "high" if avg_hr>140 else "moderate",
+        "source": "strava",
+        "strava_id": str(activity.get("id")),
+        "name": activity.get("name","Strava activity"),
+        "distance_m": round(float(activity.get("distance") or 0),1),
+        "average_heartrate": avg_hr or None,
+    }
+
+async def _sync_strava_activities(user_id: str, access_token: str, days: int=30) -> int:
+    days=max(1,min(days,90))
+    after=int((datetime.now(timezone.utc)-timedelta(days=days)).timestamp())
+    imported=0
+    async with httpx.AsyncClient(timeout=20) as hx:
+        for page in range(1,4):
+            resp=await hx.get("https://www.strava.com/api/v3/athlete/activities",params={"after":after,"page":page,"per_page":100},headers={"Authorization":f"Bearer {access_token}"})
+            if resp.status_code==401:
+                raise HTTPException(401, "Strava authorization expired. Connect Strava again.")
+            if resp.status_code!=200:
+                raise HTTPException(502, f"Strava activities sync failed ({resp.status_code})")
+            activities=resp.json()
+            for activity in activities:
+                storage.save_doc("activities",_activity_from_strava(user_id,activity))
+            imported+=len(activities)
+            if len(activities)<100: break
+    storage.set_user(user_id,{"strava_connected":True,"strava_last_sync_at":datetime.now(timezone.utc).isoformat()})
+    return imported
 
 @app.get("/auth/strava/callback")
-async def strava_callback(code: str="", state: str=""):
-    if not code or not state: return RedirectResponse("/?strava=error")
-    async with httpx.AsyncClient() as hx:
+async def strava_callback(code: str="", state: str="", scope: str=""):
+    user_id=_decode_strava_state(state)
+    if not code or not user_id: return RedirectResponse("/?strava=error")
+    accepted={s for s in scope.replace(","," ").split() if s}
+    if not ({"activity:read","activity:read_all"} & accepted): return RedirectResponse("/?strava=scope")
+    async with httpx.AsyncClient(timeout=20) as hx:
         tok=await hx.post("https://www.strava.com/oauth/token",data={"client_id":STRAVA_ID,"client_secret":STRAVA_SECRET,"code":code,"grant_type":"authorization_code"})
         if tok.status_code!=200: return RedirectResponse("/?strava=error")
-        access=tok.json()["access_token"]
-        after=int((datetime.now(timezone.utc)-timedelta(days=30)).timestamp())
-        acts=await hx.get("https://www.strava.com/api/v3/athlete/activities",params={"after":after,"per_page":100},headers={"Authorization":f"Bearer {access}"})
-    for a in (acts.json() if acts.status_code==200 else []):
-        storage.save_doc("activities",{"id":f"strava-{a['id']}","user_id":state,"date":str(a.get("start_date_local",""))[:10],"type":a.get("type","Workout").lower(),"minutes":round(float(a.get("moving_time",0))/60,1),"intensity":"high" if (a.get("average_heartrate") or 0)>140 else "moderate","source":"strava"})
-    storage.set_user(state,{"strava_connected":True}); return RedirectResponse("/?strava=ok")
+    token_data=tok.json()
+    _store_strava_tokens(user_id,token_data,scope)
+    try:
+        imported=await _sync_strava_activities(user_id,token_data["access_token"],days=30)
+    except HTTPException:
+        return RedirectResponse("/?strava=error")
+    return RedirectResponse(f"/?strava=ok&synced={imported}")
+
+@app.post("/api/strava/sync")
+async def sync_strava(days: int=30, user_id: str=Depends(get_user_id)):
+    if not STRAVA_ID or not STRAVA_SECRET: raise HTTPException(501, "Strava not configured")
+    access=await _strava_access_token(user_id)
+    imported=await _sync_strava_activities(user_id,access,days=days)
+    return {"ok": True, "synced": imported, "last_sync_at": storage.get_user(user_id).get("strava_last_sync_at","")}
 
 @app.get("/api/dashboard")
 def dashboard(insight: bool=False, user_id: str=Depends(get_user_id)):
@@ -86,7 +209,9 @@ def dashboard(insight: bool=False, user_id: str=Depends(get_user_id)):
     for a in acts:
         d=str(a.get("date",""))[:10]; trend.setdefault(d,{"calories":0,"active_min":0}); trend[d]["active_min"]+=float(a.get("minutes") or 0)
     result["trend"]=[{"date":d,**v} for d,v in sorted(trend.items())]
-    result["strava_connected"]=bool(storage.get_user(user_id).get("strava_connected"))
+    user=storage.get_user(user_id)
+    result["strava_connected"]=bool(user.get("strava_connected") and user.get("strava_refresh_token"))
+    result["strava_last_sync_at"]=user.get("strava_last_sync_at","")
     if insight and (meals or acts):
         try: result["insight"]=gemini_client.weekly_insight({k:result[k] for k in ("score","band","components","weekly","signals")})
         except Exception as e: result["insight"]=f"(unavailable: {e})"
