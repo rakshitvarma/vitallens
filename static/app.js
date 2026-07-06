@@ -376,35 +376,6 @@ const pdfMetricCard=(doc,x,y,w,label,value,accent=pdfColor.lime)=>{
   const labelLines=doc.splitTextToSize(String(label),w-22).slice(0,2);
   doc.text(labelLines,x+14,y+38);
 };
-const pdfAddCanvasImage=(doc,canvas,x,y,maxW,maxH)=>{
-  const ratio=canvas.width/canvas.height;
-  let drawW=maxW;
-  let drawH=maxW/ratio;
-  if(drawH>maxH){
-    drawH=maxH;
-    drawW=maxH*ratio;
-  }
-  const img=canvas.toDataURL("image/png",1);
-  doc.addImage(img,"PNG",x+(maxW-drawW)/2,y,drawW,drawH);
-  return y+drawH;
-};
-const pdfCaptureIntelligenceGrid=async()=>{
-  const node=document.querySelector(".intelligence-grid");
-  if(!node||!window.html2canvas)return null;
-  document.body.classList.add("pdf-export-mode");
-  await new Promise(resolve=>requestAnimationFrame(resolve));
-  try{
-    return await window.html2canvas(node,{
-      backgroundColor:null,
-      scale:2,
-      useCORS:true,
-      logging:false,
-      ignoreElements:el=>el.id==="topFoods"||el.id==="movementBreakdown",
-    });
-  }finally{
-    document.body.classList.remove("pdf-export-mode");
-  }
-};
 const pdfProgress=(doc,x,y,w,label,value,detail,accent=pdfColor.lime2)=>{
   const score=pct(value);
   doc.setFont("helvetica","bold");doc.setFontSize(9);pdfRgb(doc,pdfColor.ink);
@@ -415,13 +386,38 @@ const pdfProgress=(doc,x,y,w,label,value,detail,accent=pdfColor.lime2)=>{
   pdfFill(doc,accent);doc.roundedRect(x,y+8,Math.max(5,w*score/100),7,3,3,"F");
   pdfRgb(doc,pdfColor.muted);doc.text(detail,x,y+28,{maxWidth:w});
 };
-const pdfPill=(doc,x,y,label,color=pdfColor.lime2)=>{
-  pdfFill(doc,[241,247,239]);pdfStroke(doc,[216,229,220]);
-  doc.roundedRect(x,y,112,24,7,7,"FD");
-  pdfFill(doc,color);doc.circle(x+13,y+12,4,"F");
-  doc.setFont("helvetica","bold");doc.setFontSize(8);pdfRgb(doc,pdfColor.ink);
-  const lines=doc.splitTextToSize(String(label),82).slice(0,2);
-  doc.text(lines,x+24,y+10);
+const pdfIntelligenceCard=(doc,x,y,w,h,{title,tag,metrics,meters,accent})=>{
+  pdfFill(doc,[251,240,222]);pdfStroke(doc,[211,189,154]);
+  doc.roundedRect(x,y,w,h,8,8,"FD");
+  pdfFill(doc,accent);doc.rect(x,y,w,4,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(12);pdfRgb(doc,pdfColor.pine);
+  doc.text(title,x+14,y+24);
+  if(tag){
+    pdfFill(doc,[237,247,214]);pdfStroke(doc,[216,229,185]);
+    doc.roundedRect(x+w-66,y+10,48,18,8,8,"FD");
+    doc.setFontSize(7);pdfRgb(doc,pdfColor.lime2);
+    doc.text(String(tag).toUpperCase(),x+w-42,y+22,{align:"center"});
+  }
+  const cols=2;
+  const tileGap=8;
+  const tileW=(w-28-tileGap)/cols;
+  metrics.slice(0,4).forEach((m,i)=>{
+    const tx=x+14+(i%cols)*(tileW+tileGap);
+    const ty=y+40+Math.floor(i/cols)*43;
+    pdfFill(doc,[255,250,240]);pdfStroke(doc,[216,205,184]);
+    doc.roundedRect(tx,ty,tileW,34,7,7,"FD");
+    pdfFill(doc,accent);doc.roundedRect(tx,ty,4,34,5,5,"F");
+    doc.setFont("helvetica","bold");doc.setFontSize(11);pdfRgb(doc,pdfColor.ink);
+    pdfFitText(doc,m.value,tx+10,ty+15,tileW-16,{size:11,minSize:7});
+    doc.setFont("helvetica","normal");doc.setFontSize(7);pdfRgb(doc,pdfColor.muted);
+    doc.text(m.label,tx+10,ty+27,{maxWidth:tileW-14});
+  });
+  let my=y+136;
+  meters.slice(0,4).forEach(m=>{
+    pdfProgress(doc,x+14,my,w-28,m.label,m.value,m.detail,m.accent||accent);
+    my+=38;
+  });
+  return y+h;
 };
 const pdfTrendFallback=(doc,d,x,y,w,h)=>{
   const rows=d.trend||[];
@@ -469,19 +465,42 @@ const exportDashboardPdf=async()=>{
   pdfMetricCard(doc,458,118,78,"sodium/day",`${food.daily_avg.sodium_mg||0}mg`,pdfColor.coral);
   let y=234;
   y=pdfSection(doc,"Food and movement intelligence",y);
-  const intelligenceCanvas=await pdfCaptureIntelligenceGrid();
-  if(intelligenceCanvas){
-    y=pdfAddCanvasImage(doc,intelligenceCanvas,40,y,515,410)+28;
-  }else{
-    pdfProgress(doc,42,y,150,"Calories balance",d.components?.calories||0,`${food.daily_avg.calories||0}/${round(targets.calories_per_day,0)} kcal`,pdfColor.lime2);
-    pdfProgress(doc,222,y,150,"Sugar control",d.components?.sugar||0,`${food.daily_avg.sugar_g||0}/${round(targets.sugar_g_per_day,0)} g`,pdfColor.amber);
-    pdfProgress(doc,402,y,130,"Sodium control",d.components?.sodium||0,`${food.daily_avg.sodium_mg||0}/${round(targets.sodium_mg_per_day,0)} mg`,pdfColor.coral);
-    y+=76;
-    pdfProgress(doc,42,y,150,"Activity target",d.components?.activity||0,`${movement.active_minutes||0} active min`,pdfColor.sky);
-    pdfProgress(doc,222,y,150,"Workout consistency",d.components?.consistency||0,`${movement.workouts||0} workouts`,pdfColor.lime2);
-    pdfProgress(doc,402,y,130,"Calorie burn",Math.min(100,Math.round(num(movement.calories_burned)/1200*100)),`${movement.calories_burned||0} cal`,pdfColor.amber);
-    y+=80;
-  }
+  const cardH=286;
+  pdfIntelligenceCard(doc,40,y,250,cardH,{
+    title:"Food intelligence",
+    tag:"intake",
+    accent:pdfColor.lime2,
+    metrics:[
+      {value:`${food.daily_avg.calories||0}`,label:"kcal/day"},
+      {value:`${food.daily_avg.protein_g||0}g`,label:"protein/day"},
+      {value:`${food.daily_avg.fiber_g||0}g`,label:"fiber/day"},
+      {value:`${food.meal_count||0}`,label:"meals logged"},
+    ],
+    meters:[
+      {label:"Calories balance",value:d.components?.calories||0,detail:`${food.daily_avg.calories||0} kcal/day`,accent:pdfColor.lime2},
+      {label:"Sugar control",value:d.components?.sugar||0,detail:`${food.daily_avg.sugar_g||0}g/day`,accent:pdfColor.amber},
+      {label:"Sodium control",value:d.components?.sodium||0,detail:`${food.daily_avg.sodium_mg||0}mg/day`,accent:pdfColor.coral},
+    ],
+  });
+  pdfIntelligenceCard(doc,305,y,250,cardH,{
+    title:"Movement intelligence",
+    tag:"activity",
+    accent:pdfColor.sky,
+    metrics:[
+      {value:`${movement.active_minutes||0}`,label:"active minutes"},
+      {value:`${movement.workouts||0}`,label:"workouts"},
+      {value:`${movement.calories_burned||0}`,label:"cal burned"},
+      {value:movement.average_heartrate?`${movement.average_heartrate} bpm`:"-",label:"avg heart rate"},
+    ],
+    meters:[
+      {label:"Activity target",value:d.components?.activity||0,detail:`${movement.active_minutes||0} active min`,accent:pdfColor.sky},
+      {label:"Workout consistency",value:d.components?.consistency||0,detail:`${movement.workouts||0} workouts`,accent:pdfColor.lime2},
+      {label:"Calorie burn",value:Math.min(100,Math.round(num(movement.calories_burned)/1200*100)),detail:`${movement.calories_burned||0} cal`,accent:pdfColor.amber},
+    ],
+  });
+  y+=cardH+34;
+  y=pdfSection(doc,"Trend graph",y);
+  pdfTrendFallback(doc,d,40,y,515,136);
   doc.addPage();
   doc.setFont("helvetica","bold");doc.setFontSize(18);pdfRgb(doc,pdfColor.pine);
   doc.text("Detailed tabular data",40,48);
