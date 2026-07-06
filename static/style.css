@@ -657,7 +657,7 @@ body:not([data-theme=dark]) .export-btn:hover{
   line-height:1.12;
   overflow-wrap:anywhere;
 }
-.focus-hero .stat span:not(.stat-icon){
+.focus-hero .stat span{
   line-height:1.25;
   margin-top:4px;
 }
@@ -665,54 +665,11 @@ body:not([data-theme=dark]) .export-btn:hover{
   background:rgba(184,230,46,.12);
   border-color:rgba(143,191,16,.22);
 }
-.meal-focus .stat span:not(.stat-icon){color:var(--muted)}
+.meal-focus .stat span{color:var(--muted)}
 .movement-focus .stat{
   background:rgba(255,255,255,.09);
   border-color:rgba(26,167,200,.24);
 }
-.stat-icon{
-  flex:0 0 42px;
-  width:42px;
-  height:42px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border-radius:8px;
-  background:var(--accent-soft);
-  color:var(--lime-2);
-  margin:0;
-}
-.movement-focus .stat-icon{background:rgba(26,167,200,.18);color:#77d9ee}
-.stat-icon svg,.focus-icon-row svg{
-  display:block;
-  width:20px;
-  height:20px;
-  fill:none;
-  stroke:currentColor;
-  stroke-width:2;
-  stroke-linecap:round;
-  stroke-linejoin:round;
-  overflow:visible;
-}
-.focus-icon-row{
-  display:flex;
-  align-items:center;
-  flex-wrap:wrap;
-  gap:8px;
-  margin:-6px 0 14px;
-}
-.focus-icon-row span{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  min-height:32px;
-  border-radius:8px;
-  padding:6px 9px;
-  font-size:.76rem;
-  font-weight:900;
-}
-.meal-focus .focus-icon-row span{background:rgba(184,230,46,.14);color:var(--strong)}
-.movement-focus .focus-icon-row span{background:rgba(255,255,255,.10);color:#d7f4fb}
 .meal-focus .ring-bg{stroke:rgba(13,59,46,.12)}
 body[data-theme=dark] .meal-focus .ring-bg{stroke:rgba(255,255,255,.14)}
 .meal-focus .band{color:var(--muted)}
