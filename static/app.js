@@ -34,20 +34,31 @@ const fmtDate=value=>{
 const fmtDistance=m=>num(m)>=1000?`${round(num(m)/1000,1)} km`:`${Math.round(num(m))} m`;
 const toast=msg=>{const t=document.createElement("div");t.className="toast";t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2800);};
 const chartPalette=()=>document.body.dataset.theme==="dark"
-  ?{calories:"#b8e62e",caloriesBorder:"#d6ff65",burn:"#58d8f0",burnBorder:"#9eeeff",active:"#ffcf6b"}
-  :{calories:"#0b3d30",caloriesBorder:"#06261d",burn:"#007c9a",burnBorder:"#005c72",active:"#b35f00"};
-const applyChartTheme=()=>{
-  if(!window.Chart)return;
-  Chart.defaults.color=document.body.dataset.theme==="dark"?"#d7eadf":"#233d32";
-  Chart.defaults.borderColor=document.body.dataset.theme==="dark"?"rgba(255,255,255,.16)":"rgba(13,59,46,.18)";
-  if(trendChart){
-    const palette=chartPalette();
-    const [calories,burn,active]=trendChart.data.datasets;
+  ?{text:"#d7eadf",grid:"rgba(255,255,255,.18)",surface:"#10221b",calories:"#b8e62e",caloriesBorder:"#d6ff65",burn:"#58d8f0",burnBorder:"#9eeeff",active:"#ffcf6b"}
+  :{text:"#183529",grid:"rgba(13,59,46,.24)",surface:"#fbf0de",calories:"#0b3d30",caloriesBorder:"#06261d",burn:"#007c9a",burnBorder:"#005c72",active:"#9a5200"};
+const applyChartPalette=(chart,{update=false}={})=>{
+  if(!chart)return;
+  const palette=chartPalette();
+  const options=chart.options||{};
+  if(options.plugins?.legend?.labels)options.plugins.legend.labels.color=palette.text;
+  for(const scale of Object.values(options.scales||{})){
+    if(scale.ticks)scale.ticks.color=palette.text;
+    if(scale.grid&&scale.grid.display!==false)scale.grid.color=palette.grid;
+  }
+  if(chart===trendChart){
+    const [calories,burn,active]=chart.data?.datasets||[];
     if(calories){calories.backgroundColor=palette.calories;calories.borderColor=palette.caloriesBorder;}
     if(burn){burn.backgroundColor=palette.burn;burn.borderColor=palette.burnBorder;}
-    if(active){active.borderColor=palette.active;active.backgroundColor=palette.active;}
+    if(active){active.borderColor=palette.active;active.backgroundColor=palette.active;active.pointBackgroundColor=palette.active;active.pointBorderColor=palette.surface;}
   }
-  trendChart?.update();
+  if(update)chart.update();
+};
+const applyChartTheme=()=>{
+  if(!window.Chart)return;
+  const palette=chartPalette();
+  Chart.defaults.color=palette.text;
+  Chart.defaults.borderColor=palette.grid;
+  [trendChart,wardA,wardR].forEach(chart=>applyChartPalette(chart,{update:true}));
 };
 const setTheme=theme=>{
   const selected=theme==="dark"?"dark":"light";
