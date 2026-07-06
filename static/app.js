@@ -146,6 +146,33 @@ const nutritionFields=[
   ["salt_g","g","Salt",2],
 ];
 
+const activityTypeOptions=[
+  ["walk","Walk"],
+  ["run","Run"],
+  ["cycling","Cycling"],
+  ["swim","Swimming"],
+  ["hike","Hiking"],
+  ["gym","Gym / strength"],
+  ["yoga","Yoga"],
+  ["pilates","Pilates"],
+  ["dance","Dance"],
+  ["sport","Sport"],
+  ["football","Football"],
+  ["cricket","Cricket"],
+  ["basketball","Basketball"],
+  ["tennis","Tennis"],
+  ["badminton","Badminton"],
+  ["rowing","Rowing"],
+  ["elliptical","Elliptical"],
+  ["workout","General workout"],
+];
+const activityTypeLabel=value=>activityTypeOptions.find(([key])=>key===value)?.[1]||String(value||"Activity").replaceAll("_"," ");
+const activityTypeSelect=(name,id,value="walk")=>`
+  <select ${id?`id="${id}"`:""} ${name?`name="${name}"`:""}>
+    ${activityTypeOptions.map(([key,label])=>`<option value="${key}" ${key===value?"selected":""}>${escapeHtml(label)}</option>`).join("")}
+  </select>
+`;
+
 const numberValue=(obj,key)=>{
   if(key==="salt_g"&&!(obj?.salt_g)&&obj?.sodium_mg)return Number(obj.sodium_mg)*2.5/1000;
   return Number(obj?.[key]||0);
@@ -934,7 +961,7 @@ const renderActivityCard=a=>{
   return `
     <article class="activity-card" data-id="${escapeHtml(a.id)}">
       <div class="activity-head">
-        <div><h4>${escapeHtml(a.name||a.type||"Activity")}</h4><p>${escapeHtml(a.date||"")} - ${escapeHtml(a.source||"manual")} - ${escapeHtml(a.intensity||"moderate")}</p></div>
+        <div><h4>${escapeHtml(a.name||activityTypeLabel(a.type))}</h4><p>${escapeHtml(a.date||"")} - ${escapeHtml(activityTypeLabel(a.type))} - ${escapeHtml(a.source||"manual")} - ${escapeHtml(a.intensity||"moderate")}</p></div>
         ${canEdit?`<button class="btn small edit-activity" type="button" data-id="${escapeHtml(a.id)}">Edit</button>`:"<span class='readonly-tag'>Strava</span>"}
       </div>
       <div class="metric-grid compact">${activityMetrics(a).map(([value,label])=>`<div class="metric"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>`).join("")}</div>
@@ -949,7 +976,7 @@ const renderActivityEdit=a=>`
       <input name="name" type="text" value="${escapeHtml(a.name||"")}" placeholder="Workout name"/>
       <div class="form-grid">
         <input name="date" type="date" value="${escapeHtml(a.date||todayIso())}"/>
-        <select name="type">${["walk","run","cycling","swim","yoga","gym","sport"].map(type=>`<option value="${type}" ${a.type===type?"selected":""}>${type}</option>`).join("")}</select>
+        ${activityTypeSelect("type","",a.type||"walk")}
         <input name="minutes" type="number" step="0.1" value="${escapeHtml(a.minutes||0)}" placeholder="Minutes"/>
         <select name="intensity"><option value="moderate" ${a.intensity!=="high"?"selected":""}>Moderate</option><option value="high" ${a.intensity==="high"?"selected":""}>High intensity</option></select>
         <input name="calories_burned" type="number" step="1" value="${escapeHtml(a.calories_burned||"")}" placeholder="Calories burned"/>
@@ -1017,5 +1044,6 @@ $("chatMsg").addEventListener("keydown",e=>e.key==="Enter"&&sendChat());
 let wardA,wardR;
 async function loadCommunity(){const c=await api("/api/community");$("communityStats").innerHTML=[[c.platform_users,"active users"],[c.median_weekly_active_min+" min","median weekly activity"],[c.median_daily_sodium_mg+" mg","median daily sodium"],[c.median_daily_sugar_g+" g","median daily sugar"]].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");$("communityNote").textContent=c.note;const labels=c.wards.map(w=>w.ward);wardA?.destroy();wardR?.destroy();wardA=new Chart($("wardActive"),{type:"bar",data:{labels,datasets:[{label:"min/week",data:c.wards.map(w=>w.avg_active_min),backgroundColor:"#0E3B2E",borderRadius:6}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},y:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}}}}});wardR=new Chart($("wardRisk"),{type:"bar",data:{labels,datasets:[{label:"%",data:c.wards.map(w=>w.elevated_risk_pct),backgroundColor:"#D95245",borderRadius:6}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},y:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}}}}});}
 
+$("actType").innerHTML=activityTypeOptions.map(([key,label])=>`<option value="${key}">${escapeHtml(label)}</option>`).join("");
 initTheme();
 initAuth();
