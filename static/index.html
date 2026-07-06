@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <link rel="stylesheet" href="/static/style.css"/>
 </head>
 <body>
@@ -124,11 +125,6 @@
     <div class="focus-hero-side">
       <h1 id="mealFocusTitle">Nutrition snapshot</h1>
       <p class="sub" id="mealFocusSub">Nutrition progress against your selected-period targets.</p>
-      <div class="focus-icon-row" aria-hidden="true">
-        <span><svg viewBox="0 0 24 24"><path d="M12 3c3 4 5 6.8 5 10a5 5 0 0 1-10 0c0-3.2 2-6 5-10z"/><path d="M9.5 13h5"/></svg>Calories</span>
-        <span><svg viewBox="0 0 24 24"><path d="M5 12c4-7 10-7 14 0-4 7-10 7-14 0z"/><path d="M12 8v8M8 12h8"/></svg>Nutrients</span>
-        <span><svg viewBox="0 0 24 24"><path d="M12 3c3 3 5 6 5 9a5 5 0 0 1-10 0c0-3 2-6 5-9z"/></svg>Sugar</span>
-      </div>
       <div class="stat-row" id="mealFocusStats"></div>
       <div class="focus-meter-row" id="mealFocusBalance"></div>
     </div>
@@ -171,11 +167,6 @@
     <div class="focus-hero-side">
       <h1 id="activityFocusTitle">Movement pulse</h1>
       <p class="sub" id="activityFocusSub">Movement progress from manual logs and Strava syncs.</p>
-      <div class="focus-icon-row" aria-hidden="true">
-        <span><svg viewBox="0 0 24 24"><path d="M13 5a2 2 0 1 0-4 0 2 2 0 0 0 4 0z"/><path d="M10 8l-2 5 4 2 2 5"/></svg>Active</span>
-        <span><svg viewBox="0 0 24 24"><path d="M4 17c4-5 8-5 16 0"/><path d="M7 17l2 4M17 17l-2 4"/></svg>Steps</span>
-        <span><svg viewBox="0 0 24 24"><path d="M20 8c0 5-8 11-8 11S4 13 4 8a4 4 0 0 1 8-2 4 4 0 0 1 8 2z"/><path d="M8 12h2.5l1-2 2 4 1-2H17"/></svg>Heart</span>
-      </div>
       <div class="stat-row" id="activityFocusStats"></div>
       <div class="focus-meter-row" id="activityFocusBalance"></div>
     </div>

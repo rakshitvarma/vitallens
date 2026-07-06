@@ -224,23 +224,8 @@ const miniMeter=(label,value,detail="")=>`
     <div class="mini-meter-foot">${escapeHtml(detail)}</div>
   </div>
 `;
-const focusIcon=name=>{
-  const icons={
-    calories:`<path d="M12 3c3 4 5 7 5 10a5 5 0 0 1-10 0c0-3 2-6 5-10z"/><path d="M9.5 13h5"/>`,
-    sugar:`<path d="M12 3c3 3 5 6 5 9a5 5 0 0 1-10 0c0-3 2-6 5-9z"/>`,
-    sodium:`<path d="M12 4v16M7 7h10M8 11h8M9 15h6"/>`,
-    protein:`<path d="M5 12c4-7 10-7 14 0-4 7-10 7-14 0z"/><path d="M12 8v8M8 12h8"/>`,
-    active:`<path d="M13 5a2 2 0 1 0-4 0 2 2 0 0 0 4 0z"/><path d="M10 8l-2 5 4 2 2 5"/>`,
-    steps:`<path d="M4 17c4-5 8-5 16 0"/><path d="M7 17l2 4M17 17l-2 4"/>`,
-    burn:`<path d="M12 3c3 4 5 7 5 10a5 5 0 0 1-10 0c0-3 2-6 5-10z"/>`,
-    heart:`<path d="M20 8c0 5-8 11-8 11S4 13 4 8a4 4 0 0 1 8-2 4 4 0 0 1 8 2z"/><path d="M8 12h2.5l1-2 2 4 1-2H17"/>`,
-    workout:`<path d="M6 8v8M18 8v8M3 12h18M8 10v4M16 10v4"/>`,
-  };
-  return `<span class="stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${icons[name]||icons.calories}</svg></span>`;
-};
 const focusStat=(value,label,icon)=>`
   <div class="stat focus-stat">
-    ${focusIcon(icon)}
     <div class="focus-stat-text"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>
   </div>
 `;
@@ -381,6 +366,35 @@ const pdfMetricCard=(doc,x,y,w,label,value,accent=pdfColor.lime)=>{
   const labelLines=doc.splitTextToSize(String(label),w-22).slice(0,2);
   doc.text(labelLines,x+14,y+38);
 };
+const pdfAddCanvasImage=(doc,canvas,x,y,maxW,maxH)=>{
+  const ratio=canvas.width/canvas.height;
+  let drawW=maxW;
+  let drawH=maxW/ratio;
+  if(drawH>maxH){
+    drawH=maxH;
+    drawW=maxH*ratio;
+  }
+  const img=canvas.toDataURL("image/png",1);
+  doc.addImage(img,"PNG",x+(maxW-drawW)/2,y,drawW,drawH);
+  return y+drawH;
+};
+const pdfCaptureIntelligenceGrid=async()=>{
+  const node=document.querySelector(".intelligence-grid");
+  if(!node||!window.html2canvas)return null;
+  document.body.classList.add("pdf-export-mode");
+  await new Promise(resolve=>requestAnimationFrame(resolve));
+  try{
+    return await window.html2canvas(node,{
+      backgroundColor:null,
+      scale:2,
+      useCORS:true,
+      logging:false,
+      ignoreElements:el=>el.id==="topFoods"||el.id==="movementBreakdown",
+    });
+  }finally{
+    document.body.classList.remove("pdf-export-mode");
+  }
+};
 const pdfProgress=(doc,x,y,w,label,value,detail,accent=pdfColor.lime2)=>{
   const score=pct(value);
   doc.setFont("helvetica","bold");doc.setFontSize(9);pdfRgb(doc,pdfColor.ink);
@@ -444,51 +458,20 @@ const exportDashboardPdf=async()=>{
   pdfMetricCard(doc,372,118,78,"sugar/day",`${food.daily_avg.sugar_g||0}g`,pdfColor.amber);
   pdfMetricCard(doc,458,118,78,"sodium/day",`${food.daily_avg.sodium_mg||0}mg`,pdfColor.coral);
   let y=234;
-  y=pdfSection(doc,"Food intelligence",y);
-  pdfProgress(doc,42,y,150,"Calories balance",d.components?.calories||0,`${food.daily_avg.calories||0}/${round(targets.calories_per_day,0)} kcal`,pdfColor.lime2);
-  pdfProgress(doc,222,y,150,"Sugar control",d.components?.sugar||0,`${food.daily_avg.sugar_g||0}/${round(targets.sugar_g_per_day,0)} g`,pdfColor.amber);
-  pdfProgress(doc,402,y,130,"Sodium control",d.components?.sodium||0,`${food.daily_avg.sodium_mg||0}/${round(targets.sodium_mg_per_day,0)} mg`,pdfColor.coral);
-  y+=76;
-  y=pdfSection(doc,"Movement intelligence",y);
-  pdfProgress(doc,42,y,150,"Activity target",d.components?.activity||0,`${movement.active_minutes||0} active min`,pdfColor.sky);
-  pdfProgress(doc,222,y,150,"Workout consistency",d.components?.consistency||0,`${movement.workouts||0} workouts`,pdfColor.lime2);
-  pdfProgress(doc,402,y,130,"Calorie burn",Math.min(100,Math.round(num(movement.calories_burned)/1200*100)),`${movement.calories_burned||0} cal`,pdfColor.amber);
-  y+=76;
-  y=pdfSection(doc,"Trend graph",y);
-  try{
-    const canvas=$("trendChart");
-    if(canvas){
-      const img=canvas.toDataURL("image/png",1);
-      pdfFill(doc,[255,255,255]);pdfStroke(doc,pdfColor.line);doc.roundedRect(40,y,515,158,8,8,"FD");
-      const frame={x:56,y:y+16,w:483,h:112};
-      const canvasRatio=canvas.width&&canvas.height?canvas.width/canvas.height:frame.w/frame.h;
-      const frameRatio=frame.w/frame.h;
-      let drawW=frame.w;
-      let drawH=frame.h;
-      if(canvasRatio>frameRatio){
-        drawH=frame.w/canvasRatio;
-      }else{
-        drawW=frame.h*canvasRatio;
-      }
-      doc.addImage(img,"PNG",frame.x+(frame.w-drawW)/2,frame.y+(frame.h-drawH)/2,drawW,drawH);
-      doc.setFont("helvetica","bold");doc.setFontSize(9);pdfRgb(doc,pdfColor.ink);
-      doc.text("Trend - calories, calories burned and active minutes",56,y+142);
-    }else{
-      pdfTrendFallback(doc,d,40,y,515,158);
-    }
-  }catch{
-    pdfTrendFallback(doc,d,40,y,515,158);
+  y=pdfSection(doc,"Food and movement intelligence",y);
+  const intelligenceCanvas=await pdfCaptureIntelligenceGrid();
+  if(intelligenceCanvas){
+    y=pdfAddCanvasImage(doc,intelligenceCanvas,40,y,515,410)+28;
+  }else{
+    pdfProgress(doc,42,y,150,"Calories balance",d.components?.calories||0,`${food.daily_avg.calories||0}/${round(targets.calories_per_day,0)} kcal`,pdfColor.lime2);
+    pdfProgress(doc,222,y,150,"Sugar control",d.components?.sugar||0,`${food.daily_avg.sugar_g||0}/${round(targets.sugar_g_per_day,0)} g`,pdfColor.amber);
+    pdfProgress(doc,402,y,130,"Sodium control",d.components?.sodium||0,`${food.daily_avg.sodium_mg||0}/${round(targets.sodium_mg_per_day,0)} mg`,pdfColor.coral);
+    y+=76;
+    pdfProgress(doc,42,y,150,"Activity target",d.components?.activity||0,`${movement.active_minutes||0} active min`,pdfColor.sky);
+    pdfProgress(doc,222,y,150,"Workout consistency",d.components?.consistency||0,`${movement.workouts||0} workouts`,pdfColor.lime2);
+    pdfProgress(doc,402,y,130,"Calorie burn",Math.min(100,Math.round(num(movement.calories_burned)/1200*100)),`${movement.calories_burned||0} cal`,pdfColor.amber);
+    y+=80;
   }
-  y+=190;
-  y=pdfSection(doc,"Day log markers",y);
-  (d.day_log||[]).slice(0,14).forEach((row,i)=>{
-    const x=42+(i%7)*72;
-    const yy=y+Math.floor(i/7)*46;
-    const color=row.status==="elevated"?pdfColor.coral:row.status==="watch"?pdfColor.amber:row.status==="healthy"?pdfColor.lime2:pdfColor.line;
-    pdfFill(doc,color);doc.circle(x,yy,5,"F");
-    doc.setFont("helvetica","bold");doc.setFontSize(8);pdfRgb(doc,pdfColor.ink);doc.text(fmtDate(row.date),x+10,yy+3);
-    doc.setFont("helvetica","normal");doc.setFontSize(7);pdfRgb(doc,pdfColor.muted);doc.text(`${row.calories} kcal | ${row.active_min} min`,x+10,yy+14,{maxWidth:58});
-  });
   doc.addPage();
   doc.setFont("helvetica","bold");doc.setFontSize(18);pdfRgb(doc,pdfColor.pine);
   doc.text("Detailed tabular data",40,48);
@@ -550,7 +533,7 @@ const exportDashboardPdf=async()=>{
   doc.autoTable({
     ...options,
     startY:doc.lastAutoTable.finalY+18,
-    head:[["Date","Calories","Active min","Steps","Meals","Activities","Notes"]],
+    head:[["Date","Calories","Active min","Steps","Meals","Activities"]],
     body:(d.day_log||[]).map(row=>[
       tableValue(row.date),
       tableValue(row.calories),
@@ -558,7 +541,6 @@ const exportDashboardPdf=async()=>{
       tableValue(row.steps),
       tableValue(row.meals),
       tableValue(row.activities),
-      tableValue([...(row.meal_names||[]),...(row.activity_names||[])].slice(0,3).join(" / ")),
     ]),
   });
   doc.save(`VitalLens-report-${toIsoDate(dashboardAnchor)}.pdf`);

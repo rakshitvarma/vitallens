@@ -421,6 +421,9 @@ body[data-theme=dark][data-active-tab=activity] .card{
     linear-gradient(145deg,rgba(16,34,27,.94),rgba(16,45,50,.68)),
     repeating-linear-gradient(125deg,transparent 0 44px,rgba(26,167,200,.08) 44px 45px,transparent 45px 88px);
 }
+.pdf-export-mode .intelligence-grid .mini-list{
+  display:none !important;
+}
 .card h2{font-size:1.32rem;line-height:1.2;margin-bottom:5px}
 .card h3{font-size:1rem;line-height:1.25;margin-bottom:13px}
 .card .sub{color:var(--muted);font-size:.94rem;margin-bottom:15px}
