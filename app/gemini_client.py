@@ -11,21 +11,48 @@ from google import genai
 from google.genai import types
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+MISSING_GEMINI_CONFIG = (
+    "Gemini is not configured. Set GEMINI_API_KEY on Cloud Run, or set "
+    "GOOGLE_GENAI_USE_VERTEXAI=true with GOOGLE_CLOUD_PROJECT."
+)
+TEMPORARY_GEMINI_UNAVAILABLE = (
+    "Gemini is temporarily unavailable due to high demand. Please try again in a few minutes."
+)
 
 _client = None
+
+def _use_vertex_ai() -> bool:
+    return os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").lower() == "true"
+
+
+def is_configured() -> bool:
+    return bool(os.environ.get("GEMINI_API_KEY")) or (
+        _use_vertex_ai() and bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+    )
+
+
+def user_facing_error(exc: Exception) -> str:
+    text = str(exc)
+    if "503" in text and ("UNAVAILABLE" in text or "high demand" in text):
+        return TEMPORARY_GEMINI_UNAVAILABLE
+    return f"Gemini request failed: {text}"
 
 
 def client() -> genai.Client:
     global _client
     if _client is None:
-        if os.environ.get("GOOGLE_GENAI_USE_VERTEXAI") == "true":
+        if os.environ.get("GEMINI_API_KEY"):
+            _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        elif _use_vertex_ai():
+            if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
+                raise RuntimeError(MISSING_GEMINI_CONFIG)
             _client = genai.Client(
                 vertexai=True,
                 project=os.environ["GOOGLE_CLOUD_PROJECT"],
                 location=os.environ.get("GOOGLE_CLOUD_LOCATION", "asia-south1"),
             )
         else:
-            _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+            raise RuntimeError(MISSING_GEMINI_CONFIG)
     return _client
 
 

@@ -35,7 +35,7 @@ gcloud run deploy vitallens \
   --source . \
   --region asia-south1 \
   --allow-unauthenticated \
-  --set-env-vars GEMINI_API_KEY=YOUR_KEY,STRAVA_CLIENT_ID=YOUR_ID,STRAVA_CLIENT_SECRET=YOUR_SECRET
+  --update-env-vars GEMINI_API_KEY=YOUR_KEY,STRAVA_CLIENT_ID=YOUR_ID,STRAVA_CLIENT_SECRET=YOUR_SECRET
 ```
 
 Then set the public URL (needed for Strava OAuth redirects):
@@ -44,6 +44,32 @@ Then set the public URL (needed for Strava OAuth redirects):
 gcloud run services update vitallens --region asia-south1 \
   --update-env-vars PUBLIC_BASE_URL=https://YOUR-SERVICE-URL.run.app
 ```
+
+## Gemini key
+
+Gemini is required for meal-photo analysis, weekly insight, and coach chat. Add
+the real key only as an environment variable; never commit it to the repo.
+
+For Cloud Run:
+
+```bash
+gcloud run services update vitallens --region asia-south1 \
+  --update-env-vars GEMINI_API_KEY=YOUR_AI_STUDIO_KEY
+```
+
+For local PowerShell:
+
+```powershell
+$env:GEMINI_API_KEY="YOUR_AI_STUDIO_KEY"
+uvicorn app.main:app --port 8080
+```
+
+If the key is missing, the app still loads, but Gemini actions return a setup
+message instead of a raw missing-key error.
+
+If Gemini returns a temporary high-demand error, the dashboard weekly insight
+falls back to a local score-based insight. Meal-photo analysis and coach chat
+show a short retry message because those responses require Gemini.
 
 ## Sign-in
 

@@ -82,7 +82,7 @@ async function loadDashboard(withInsight=false){
     $("components").innerHTML=Object.entries(d.components).map(([k,v])=>`<div class="comp"><div class="lbl"><span>${k}</span><span>${v}</span></div><div class="bar"><i style="width:${v}%"></i></div></div>`).join("");
     trendChart?.destroy();
     trendChart=new Chart($("trendChart"),{data:{labels:d.trend.map(t=>t.date.slice(5)),datasets:[{type:"bar",label:"Calories",data:d.trend.map(t=>Math.round(t.calories)),backgroundColor:"#0E3B2E",borderRadius:6,yAxisID:"y"},{type:"line",label:"Active minutes",data:d.trend.map(t=>t.active_min),borderColor:"#8FBF10",backgroundColor:"#8FBF10",tension:.35,yAxisID:"y1"}]},options:{scales:{y:{position:"left"},y1:{position:"right",grid:{display:false}}}}});
-    if(d.insight){$("insightCard").hidden=false;$("insightText").textContent=d.insight;}
+    if(d.insight){$("insightCard").hidden=false;$("insightText").textContent=d.insight_note?`${d.insight}\n\n${d.insight_note}`:d.insight;}
     _stravaConnected=!!d.strava_connected;
     $("stravaStatus").textContent=d.strava_connected?`Strava connected${d.strava_last_sync_at?" - last sync "+new Date(d.strava_last_sync_at).toLocaleString():""}`:"";
     $("btnStrava").textContent=d.strava_connected?"Re-sync Strava":"Connect Strava";

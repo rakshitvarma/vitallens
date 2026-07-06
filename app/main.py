@@ -21,6 +21,27 @@ STRAVA_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8080")
 STRAVA_SCOPE = "activity:read_all"
 
+def _fallback_weekly_insight(score_data: dict) -> str:
+    weekly = score_data.get("weekly", {})
+    signals = score_data.get("signals", [])
+    signal = next((s for s in signals if s.get("level") != "healthy"), signals[0] if signals else {})
+    action = "Log meals on at least 5 days this week so the score has a stronger baseline."
+    if weekly.get("active_minutes", 0) < 150:
+        action = "Add three 20-minute brisk walks this week to move closer to the 150-minute activity target."
+    elif weekly.get("avg_sodium_mg", 0) > 2000:
+        action = "Choose one lower-salt swap each day, such as less packaged food or asking for less salt in cooked meals."
+    elif weekly.get("avg_sugar_g", 0) > 50:
+        action = "Replace one sweet drink or dessert with fruit, curd, or unsweetened tea on most days."
+    elif weekly.get("avg_protein_g", 0) < 55:
+        action = "Add one protein serving such as dal, paneer, eggs, curd, chana, or lean meat to one meal daily."
+    return (
+        f"Your VitalScore is {score_data.get('score')} ({score_data.get('band')}). "
+        f"This week you logged {weekly.get('active_minutes', 0)} active minutes, "
+        f"{weekly.get('avg_sugar_g', 0)}g sugar/day, and {weekly.get('avg_sodium_mg', 0)}mg sodium/day. "
+        f"Main signal: {str(signal.get('type', 'overall balance')).replace('_', ' ')} - "
+        f"{signal.get('why', 'your recent logs need a little more consistency')}. {action}"
+    )
+
 @app.get("/api/health")
 def health(): return {"ok": True}
 
@@ -28,6 +49,8 @@ def health(): return {"ok": True}
 def config():
     return {
         "auth_provider": AUTH_PROVIDER,
+        "gemini_enabled": gemini_client.is_configured(),
+        "gemini_model": gemini_client.MODEL,
         "strava_enabled": bool(STRAVA_ID),
         "auth_enabled": AUTH_CONFIGURED,
         "auth_error": AUTH_CONFIG_ERROR,
@@ -37,8 +60,12 @@ def config():
 async def analyze_meal(image: UploadFile=File(...), portion_note: str=Form(""), user_id: str=Depends(get_user_id)):
     data = await image.read()
     if len(data) > 8_000_000: raise HTTPException(413, "Image too large")
-    try: return gemini_client.analyze_meal_image(data, image.content_type or "image/jpeg", portion_note)
-    except Exception as e: raise HTTPException(502, f"Gemini failed: {e}") from e
+    try:
+        return gemini_client.analyze_meal_image(data, image.content_type or "image/jpeg", portion_note)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e)) from e
+    except Exception as e:
+        raise HTTPException(503, gemini_client.user_facing_error(e)) from e
 
 class MealIn(BaseModel):
     date: str|None=None; meal_guess: str="meal"; items: list[dict]=[]; calories: float=0; protein_g: float=0; carbs_g: float=0; fat_g: float=0; sugar_g: float=0; sodium_mg: float=0
@@ -204,8 +231,17 @@ def dashboard(insight: bool=False, user_id: str=Depends(get_user_id)):
     result["strava_connected"]=bool(user.get("strava_connected") and user.get("strava_refresh_token"))
     result["strava_last_sync_at"]=user.get("strava_last_sync_at","")
     if insight and (meals or acts):
-        try: result["insight"]=gemini_client.weekly_insight({k:result[k] for k in ("score","band","components","weekly","signals")})
-        except Exception as e: result["insight"]=f"(unavailable: {e})"
+        insight_data={k:result[k] for k in ("score","band","components","weekly","signals")}
+        try:
+            result["insight"]=gemini_client.weekly_insight(insight_data)
+            result["insight_source"]="gemini"
+        except RuntimeError as e:
+            result["insight"]=str(e)
+            result["insight_source"]="configuration"
+        except Exception as e:
+            result["insight"]=_fallback_weekly_insight(insight_data)
+            result["insight_source"]="local_fallback"
+            result["insight_note"]="Gemini was temporarily unavailable, so VitalLens generated this from the local score data."
     return result
 
 class ChatIn(BaseModel):
@@ -217,8 +253,12 @@ def chat(body: ChatIn, user_id: str=Depends(get_user_id)):
     meals=storage.query_docs("meals",user_id=user_id,since_iso=since)
     acts=storage.query_docs("activities",user_id=user_id,since_iso=since)
     score=scoring.compute_score(meals,acts)
-    try: reply=gemini_client.chat(body.message,{k:score[k] for k in ("score","band","weekly","signals")},meals,acts,body.history)
-    except Exception as e: raise HTTPException(502,f"Gemini chat failed: {e}") from e
+    try:
+        reply=gemini_client.chat(body.message,{k:score[k] for k in ("score","band","weekly","signals")},meals,acts,body.history)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e)) from e
+    except Exception as e:
+        raise HTTPException(503, gemini_client.user_facing_error(e)) from e
     return {"reply": reply}
 
 WARDS=["Saket","Dwarka","Rohini","Lajpat Nagar","Karol Bagh","Vasant Kunj"]

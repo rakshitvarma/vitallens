@@ -32,6 +32,11 @@ read -p "Strava Client ID (leave blank to skip): " STRAVA_ID
 read -p "Strava Client Secret (leave blank to skip): " STRAVA_SECRET
 read -p "GitHub repo URL (e.g. https://github.com/you/vitallens.git): " GITHUB_URL
 
+if [ -z "$GEMINI_KEY" ]; then
+    echo "Gemini API key is required for meal analysis, weekly insight, and chat."
+    exit 1
+fi
+
 # ---------- 3. Set GCP project ----------
 echo ""
 echo "Setting GCP project to: $GCP_PROJECT"
@@ -72,7 +77,7 @@ gcloud run deploy vitallens \
     --allow-unauthenticated \
     --memory 512Mi \
     --timeout 120 \
-    --set-env-vars "$ENV_VARS" \
+    --update-env-vars "$ENV_VARS" \
     --remove-env-vars GOOGLE_CLIENT_ID,GOOGLE_OAUTH_CLIENT_ID,VITE_GOOGLE_CLIENT_ID,NEXT_PUBLIC_GOOGLE_CLIENT_ID,AUTH_PROVIDER,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_JWT_SECRET,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 # Get the deployed URL
