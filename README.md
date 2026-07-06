@@ -1,30 +1,59 @@
 # VitalLens
 
-VitalLens is a lifestyle intelligence web app built for the Gen AI Academy Hackathon. It helps users understand how food intake and movement patterns affect everyday health signals.
+VitalLens turns everyday food, movement, and habit data into clear lifestyle signals for better everyday health.
 
 Live app: https://vitallens-s3cdt46tda-el.a.run.app/
 
 ## What It Does
 
-- Meal photo analysis: upload a meal photo and Gemini estimates dishes, serving details, calories, protein, carbs, fat, sugar, fiber, sodium, and salt.
-- Editable meal logs: review recent meals and correct nutrition or serving details manually.
-- Movement tracking: log workouts manually or sync recent activities from Strava.
-- VitalScore dashboard: see a week or month score with food, movement, risk signals, day logs, and comparisons.
+- Meal analysis: upload a meal photo with portion details, or type what you ate, and Gemini breaks it into dishes, servings, calories, protein, carbs, fat, sugar, fiber, sodium, and salt.
+- Editable meal logs: review the analysis, save it, and correct any item, serving, total, or note later.
+- Movement tracking: log workouts manually or connect Strava to pull recent activities.
+- VitalScore dashboard: compare food intake, movement, risk signals, day logs, and week/month trends in one view.
 - Personal targets: set daily food goals and weekly movement goals for calories, sugar, sodium, protein, fiber, steps, active minutes, and burn.
-- Dark mode: switch between light and dark themes with readable dashboard, form, and table colors.
-- PDF export: download the selected week/month report with summary and tabular food, movement, score, comparison, and day-log data.
-- Coach chat: ask questions about your own logged data.
-- Community pulse: view anonymized aggregate wellness signals for public-health style insights.
+- Coach chat: ask questions grounded in your own meal and activity history.
+- PDF reports: export a dashboard-style report with score summary, trend graph, intelligence markers, and detailed tables.
+- Community pulse: view anonymized aggregate movement and lifestyle patterns for population-level insight.
 
-## Quick Demo Flow
+## User Flow
 
-1. Open the live app.
-2. Click `Load demo week` on the Dashboard.
-3. Review the VitalScore, risk signals, food intelligence, movement intelligence, and day log.
-4. Open `Meals`, upload a food photo, analyze it, and save it to the log.
-5. Open `Movement`, add an activity or connect Strava.
-6. Use `Export PDF` to download the current report.
-7. Try the Coach tab with a question like: `Can I eat biryani tonight?`
+1. Start on the Dashboard to see the current week or month, VitalScore, food intelligence, movement intelligence, risk signals, trend chart, and day log.
+2. Go to Meals and choose either `Photo + details` or `Details only`.
+3. Gemini returns an itemized meal breakdown. Review the table, then save it to recent meals.
+4. Edit saved meals when the estimate needs correction.
+5. Go to Movement to add manual activities such as walking, running, gym, cycling, yoga, or sport.
+6. Optionally connect Strava to sync recent workouts automatically.
+7. Set personal targets so the score and progress markers reflect the user's goals.
+8. Export the selected period as a PDF report for sharing or review.
+9. Use Coach to ask practical questions about the logged data.
+
+## Architecture
+
+```text
+Browser SPA
+  -> FastAPI backend on Cloud Run
+      -> Gemini for meal analysis, weekly insight, and coach responses
+      -> Rule-based VitalScore engine for transparent scoring
+      -> Firestore for deployed persistence
+      -> Local JSON storage when DISABLE_FIRESTORE=1
+      -> Strava OAuth and activity sync
+```
+
+### Frontend
+
+The app is a lightweight HTML/CSS/JavaScript single-page interface served from FastAPI. It handles tab navigation, meal upload/text entry, activity logging, dashboard rendering, dark mode, PDF export, and Chart.js visualizations.
+
+### Backend
+
+FastAPI exposes APIs for dashboard analytics, meal analysis, meal logs, movement logs, targets, Strava OAuth, coach chat, and community aggregates. It normalizes meal and activity records before saving so the dashboard can compute consistent summaries.
+
+### Gemini
+
+Gemini powers the generated parts of the experience: photo-based meal analysis, text-only meal parsing, weekly insights, and coach responses. The numeric score remains rule-based so the dashboard stays transparent.
+
+### Storage
+
+Cloud Run uses Firestore when configured. Local development can use JSON storage by setting `DISABLE_FIRESTORE=1`, which keeps setup simple for running from the repo.
 
 ## Run Locally From The Repo
 
@@ -100,9 +129,8 @@ PUBLIC_BASE_URL=required for Strava redirects in deployment
 
 ## Notes
 
-- Sign-in is disabled for the hackathon demo. The app creates a local demo user in the browser.
-- Gemini generates nutrition estimates and coaching text. The score is rule-based and transparent.
-- VitalLens shows lifestyle signals, not medical diagnosis.
+- Sign-in is disabled for the public demo. The browser creates a local demo user id.
+- Gemini generates nutrition estimates and coaching text. VitalScore is computed by a rule-based scoring engine.
 - Firestore is used in Cloud Run when available; local development can use JSON storage with `DISABLE_FIRESTORE=1`.
 
 ## Stack

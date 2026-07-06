@@ -1,6 +1,6 @@
 """Gemini (Vertex AI / AI Studio) integration for VitalLens.
 
-- analyze_meal_image: multimodal — photo + portion note -> structured nutrition JSON
+- analyze_meal_image: multimodal - photo + portion note -> structured nutrition JSON
 - weekly_insight: score data -> plain-language coaching narrative
 - chat: conversational answers grounded ONLY in the user's own logs + score
 """
@@ -141,8 +141,8 @@ Here is the user's last-7-day data and transparent score breakdown (rule-based, 
 {json.dumps(score_data, indent=2)}
 
 Write a short coaching insight: 3-4 sentences max. Reference their actual numbers.
-One specific, achievable action for the coming week. No greetings, no disclaimers,
-no medical diagnosis — signals only. Plain language."""
+One specific, achievable action for the coming week. No greetings, no disclaimers.
+Use plain language and focus on practical lifestyle signals."""
     resp = client().models.generate_content(
         model=MODEL, contents=prompt,
         config=types.GenerateContentConfig(temperature=0.6),
@@ -168,8 +168,7 @@ and general nutrition/exercise science. Their data:
 {json.dumps(context, default=str)}
 
 Rules: be specific with their numbers; keep answers under 120 words; give actionable
-guidance; you provide lifestyle signals, not medical diagnoses — say so ONLY if the user
-asks about disease risk; if data is insufficient, say what to log."""
+guidance from lifestyle signals; if data is insufficient, say what to log."""
     contents = []
     for turn in history[-6:]:
         contents.append(types.Content(role=turn["role"], parts=[types.Part.from_text(text=turn["text"])]))
