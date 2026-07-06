@@ -70,13 +70,15 @@ both public Supabase browser values to the SPA:
 
 ```bash
 gcloud run services update vitallens --region asia-south1 \
-  --update-env-vars SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co,SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY
+  --update-env-vars AUTH_PROVIDER=supabase,SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co,SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY
 ```
 
 `SUPABASE_JWT_SECRET` is optional. If it is absent, the API verifies the browser's
 Supabase access token against Supabase Auth. If only `SUPABASE_JWT_SECRET` is set
 without `SUPABASE_URL` and `SUPABASE_ANON_KEY`, the app intentionally falls back
 to demo mode instead of showing `Dashboard: Missing Authorization header`.
+If both direct Google and Supabase credentials exist on Cloud Run, `AUTH_PROVIDER=supabase`
+forces the Supabase flow.
 
 Configure the provider allowlists:
 
