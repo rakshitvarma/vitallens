@@ -122,22 +122,35 @@
       <div class="ring-center"><div class="score" id="mealScoreNum">-</div><div class="band" id="mealScoreBand">Food balance</div></div>
     </div>
     <div class="focus-hero-side">
-      <h1 id="mealFocusTitle">Your meals, decoded.</h1>
+      <h1 id="mealFocusTitle">Nutrition snapshot</h1>
       <p class="sub" id="mealFocusSub">Nutrition progress against your selected-period targets.</p>
+      <div class="focus-icon-row" aria-hidden="true">
+        <span><svg viewBox="0 0 24 24"><path d="M12 3c3 4 5 6.8 5 10a5 5 0 0 1-10 0c0-3.2 2-6 5-10z"/><path d="M9.5 13h5"/></svg>Calories</span>
+        <span><svg viewBox="0 0 24 24"><path d="M5 12c4-7 10-7 14 0-4 7-10 7-14 0z"/><path d="M12 8v8M8 12h8"/></svg>Nutrients</span>
+        <span><svg viewBox="0 0 24 24"><path d="M12 3c3 3 5 6 5 9a5 5 0 0 1-10 0c0-3 2-6 5-9z"/></svg>Sugar</span>
+      </div>
       <div class="stat-row" id="mealFocusStats"></div>
       <div class="focus-meter-row" id="mealFocusBalance"></div>
     </div>
   </div>
   <div class="card">
-    <h2>Snap it. We'll count it.</h2>
-    <p class="sub">Upload a photo of your plate. Gemini identifies each dish and returns full nutrition.</p>
+    <div class="card-head">
+      <div>
+        <h2>Log a meal</h2>
+        <p class="sub">Upload a photo or describe what you ate. Gemini breaks it into itemized nutrition before you save.</p>
+      </div>
+      <div class="segmented meal-mode-switch" role="group" aria-label="Meal analysis mode">
+        <button id="mealPhotoMode" type="button" class="active">Photo + details</button>
+        <button id="mealTextMode" type="button">Details only</button>
+      </div>
+    </div>
     <div class="meal-form">
       <div class="drop" id="drop" role="button" tabindex="0" aria-label="Choose a meal photo">
         <input type="file" id="mealImage" accept="image/*" hidden/>
         <span id="dropText">Tap to choose or drop a meal photo</span>
         <img id="preview" hidden alt="meal preview"/>
       </div>
-      <input type="text" id="portionNote" placeholder="Portion details, e.g. '2 rotis, small bowl of dal'"/>
+      <textarea id="portionNote" placeholder="Describe your meal, e.g. '2 rotis, small bowl dal, half cup rice'"></textarea>
       <button class="btn primary" id="btnAnalyze">Analyze with Gemini</button>
     </div>
     <div id="analysisResult" hidden>
@@ -156,8 +169,13 @@
       <div class="ring-center"><div class="score" id="activityScoreNum">-</div><div class="band" id="activityScoreBand">Movement</div></div>
     </div>
     <div class="focus-hero-side">
-      <h1 id="activityFocusTitle">Your movement, decoded.</h1>
+      <h1 id="activityFocusTitle">Movement pulse</h1>
       <p class="sub" id="activityFocusSub">Movement progress from manual logs and Strava syncs.</p>
+      <div class="focus-icon-row" aria-hidden="true">
+        <span><svg viewBox="0 0 24 24"><path d="M13 5a2 2 0 1 0-4 0 2 2 0 0 0 4 0z"/><path d="M10 8l-2 5 4 2 2 5"/></svg>Active</span>
+        <span><svg viewBox="0 0 24 24"><path d="M4 17c4-5 8-5 16 0"/><path d="M7 17l2 4M17 17l-2 4"/></svg>Steps</span>
+        <span><svg viewBox="0 0 24 24"><path d="M20 8c0 5-8 11-8 11S4 13 4 8a4 4 0 0 1 8-2 4 4 0 0 1 8 2z"/><path d="M8 12h2.5l1-2 2 4 1-2H17"/></svg>Heart</span>
+      </div>
       <div class="stat-row" id="activityFocusStats"></div>
       <div class="focus-meter-row" id="activityFocusBalance"></div>
     </div>

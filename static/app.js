@@ -186,6 +186,21 @@ const miniMeter=(label,value,detail="")=>`
     <div class="mini-meter-foot">${escapeHtml(detail)}</div>
   </div>
 `;
+const focusIcon=name=>{
+  const icons={
+    calories:`<path d="M12 3c3 4 5 7 5 10a5 5 0 0 1-10 0c0-3 2-6 5-10z"/><path d="M9.5 13h5"/>`,
+    sugar:`<path d="M12 3c3 3 5 6 5 9a5 5 0 0 1-10 0c0-3 2-6 5-9z"/>`,
+    sodium:`<path d="M12 4v16M7 7h10M8 11h8M9 15h6"/>`,
+    protein:`<path d="M5 12c4-7 10-7 14 0-4 7-10 7-14 0z"/><path d="M12 8v8M8 12h8"/>`,
+    active:`<path d="M13 5a2 2 0 1 0-4 0 2 2 0 0 0 4 0z"/><path d="M10 8l-2 5 4 2 2 5"/>`,
+    steps:`<path d="M4 17c4-5 8-5 16 0"/><path d="M7 17l2 4M17 17l-2 4"/>`,
+    burn:`<path d="M12 3c3 4 5 7 5 10a5 5 0 0 1-10 0c0-3 2-6 5-10z"/>`,
+    heart:`<path d="M20 8c0 5-8 11-8 11S4 13 4 8a4 4 0 0 1 8-2 4 4 0 0 1 8 2z"/><path d="M8 12h2.5l1-2 2 4 1-2H17"/>`,
+    workout:`<path d="M6 8v8M18 8v8M3 12h18M8 10v4M16 10v4"/>`,
+  };
+  return `<span class="stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${icons[name]||icons.calories}</svg></span>`;
+};
+const focusStat=(value,label,icon)=>`<div class="stat">${focusIcon(icon)}<b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>`;
 const setFocusRing=(kind,score)=>{
   const value=pct(score);
   const ring=$(kind==="meal"?"mealRingFg":"activityRingFg");
@@ -405,12 +420,12 @@ const renderFocusDashboards=d=>{
     setFocusRing("meal",foodScore);
     $("mealFocusSub").textContent=`${d.period?.label||"Selected period"} nutrition progress against your daily food targets.`;
     $("mealFocusStats").innerHTML=[
-      [food.daily_avg.calories||0,"kcal/day"],
-      [`${food.daily_avg.sugar_g||0}g`,"sugar/day"],
-      [`${food.daily_avg.sodium_mg||0}mg`,"sodium/day"],
-      [`${food.daily_avg.protein_g||0}g`,"protein/day"],
-      [`${food.meal_count||0}`,"meals logged"],
-    ].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+      [food.daily_avg.calories||0,"kcal/day","calories"],
+      [`${food.daily_avg.sugar_g||0}g`,"sugar/day","sugar"],
+      [`${food.daily_avg.sodium_mg||0}mg`,"sodium/day","sodium"],
+      [`${food.daily_avg.protein_g||0}g`,"protein/day","protein"],
+      [`${food.meal_count||0}`,"meals logged","calories"],
+    ].map(([v,l,i])=>focusStat(v,l,i)).join("");
     $("mealFocusBalance").innerHTML=foodMeters.slice(0,3).map(([label,value,detail])=>miniMeter(label,value,detail)).join("");
   }
   if($("activityFocusStats")){
@@ -427,12 +442,12 @@ const renderFocusDashboards=d=>{
     setFocusRing("activity",movementScore);
     $("activityFocusSub").textContent=`${d.period?.label||"Selected period"} movement progress from workouts, steps and synced activity.`;
     $("activityFocusStats").innerHTML=[
-      [movement.active_minutes||0,"active min"],
-      [movement.steps||0,"steps"],
-      [movement.workouts||0,"workouts"],
-      [movement.calories_burned||0,"cal burned"],
-      [movement.average_heartrate?`${movement.average_heartrate} bpm`:"-","avg heart rate"],
-    ].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+      [movement.active_minutes||0,"active min","active"],
+      [movement.steps||0,"steps","steps"],
+      [movement.workouts||0,"workouts","workout"],
+      [movement.calories_burned||0,"cal burned","burn"],
+      [movement.average_heartrate?`${movement.average_heartrate} bpm`:"-","avg heart rate","heart"],
+    ].map(([v,l,i])=>focusStat(v,l,i)).join("");
     $("activityFocusBalance").innerHTML=movementMeters.slice(0,3).map(([label,value,detail])=>miniMeter(label,value,detail)).join("");
   }
 };
@@ -560,12 +575,29 @@ $("btnSaveTargets").addEventListener("click",async()=>{
 });
 
 let lastAnalysis=null;
+let lastAnalysisSource="photo";
+let mealAnalysisMode="photo";
 let selectedMealFile=null;
 let previewUrl=null;
 const MAX_UPLOAD_BYTES=7_500_000;
 const MAX_IMAGE_DIMENSION=1600;
 const drop=$("drop");
 const mealImage=$("mealImage");
+const mealForm=document.querySelector(".meal-form");
+
+const setMealInputMode=mode=>{
+  mealAnalysisMode=mode==="text"?"text":"photo";
+  lastAnalysis=null;
+  $("analysisResult").hidden=true;
+  $("mealPhotoMode").classList.toggle("active",mealAnalysisMode==="photo");
+  $("mealTextMode").classList.toggle("active",mealAnalysisMode==="text");
+  mealForm.classList.toggle("text-mode",mealAnalysisMode==="text");
+  drop.setAttribute("aria-hidden",mealAnalysisMode==="text"?"true":"false");
+  if(mealAnalysisMode==="text"&&selectedMealFile)resetMealUpload(false);
+  $("portionNote").placeholder=mealAnalysisMode==="text"
+    ?"Type what you ate, e.g. '2 rotis, small bowl dal, half cup rice'"
+    :"Add portion details, e.g. '2 rotis, small bowl dal'";
+};
 
 const setMealFile=file=>{
   if(!file)return;
@@ -575,10 +607,11 @@ const setMealFile=file=>{
   previewUrl=URL.createObjectURL(file);
   $("preview").src=previewUrl;$("preview").hidden=false;$("dropText").hidden=true;
 };
-const resetMealUpload=()=>{
+const resetMealUpload=(clearNote=true)=>{
   selectedMealFile=null;mealImage.value="";
   if(previewUrl)URL.revokeObjectURL(previewUrl);
-  previewUrl=null;$("preview").src="";$("preview").hidden=true;$("dropText").hidden=false;drop.classList.remove("has-file");$("portionNote").value="";
+  previewUrl=null;$("preview").src="";$("preview").hidden=true;$("dropText").hidden=false;drop.classList.remove("has-file");
+  if(clearNote)$("portionNote").value="";
 };
 const loadImage=file=>new Promise((resolve,reject)=>{
   const img=new Image();const url=URL.createObjectURL(file);
@@ -601,21 +634,30 @@ const prepareImageForUpload=async file=>{
   return prepared;
 };
 
-drop.addEventListener("click",e=>{if(e.target!==mealImage){mealImage.value="";mealImage.click();}});
-drop.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();mealImage.value="";mealImage.click();}});
+$("mealPhotoMode").addEventListener("click",()=>setMealInputMode("photo"));
+$("mealTextMode").addEventListener("click",()=>setMealInputMode("text"));
+drop.addEventListener("click",e=>{if(mealAnalysisMode==="photo"&&e.target!==mealImage){mealImage.value="";mealImage.click();}});
+drop.addEventListener("keydown",e=>{if(mealAnalysisMode==="photo"&&(e.key==="Enter"||e.key===" ")){e.preventDefault();mealImage.value="";mealImage.click();}});
 mealImage.addEventListener("change",()=>setMealFile(mealImage.files[0]));
-["dragenter","dragover"].forEach(type=>drop.addEventListener(type,e=>{e.preventDefault();drop.classList.add("dragover");}));
+["dragenter","dragover"].forEach(type=>drop.addEventListener(type,e=>{e.preventDefault();if(mealAnalysisMode==="photo")drop.classList.add("dragover");}));
 ["dragleave","drop"].forEach(type=>drop.addEventListener(type,e=>{e.preventDefault();drop.classList.remove("dragover");}));
-drop.addEventListener("drop",e=>setMealFile(e.dataTransfer.files[0]));
+drop.addEventListener("drop",e=>{if(mealAnalysisMode==="photo")setMealFile(e.dataTransfer.files[0]);});
 
 $("btnAnalyze").addEventListener("click",async()=>{
-  if(!selectedMealFile)return toast("Choose a meal photo first");
-  const b=$("btnAnalyze");b.disabled=true;b.textContent="Preparing image...";
+  const note=$("portionNote").value.trim();
+  if(!selectedMealFile&&!note)return toast("Add a meal photo or type what you ate");
+  const b=$("btnAnalyze");b.disabled=true;b.textContent=selectedMealFile?"Preparing image...":"Gemini is reading...";
   try{
-    const uploadFile=await prepareImageForUpload(selectedMealFile);
-    const fd=new FormData();fd.append("image",uploadFile,uploadFile.name);fd.append("portion_note",$("portionNote").value);
     b.textContent="Gemini is analyzing...";
-    lastAnalysis=await api("/api/meals/analyze",{method:"POST",body:fd});
+    if(selectedMealFile){
+      const uploadFile=await prepareImageForUpload(selectedMealFile);
+      const fd=new FormData();fd.append("image",uploadFile,uploadFile.name);fd.append("portion_note",note);
+      lastAnalysis=await api("/api/meals/analyze",{method:"POST",body:fd});
+      lastAnalysisSource="photo";
+    }else{
+      lastAnalysis=await api("/api/meals/analyze-text",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({portion_note:note})});
+      lastAnalysisSource="text";
+    }
     renderAnalysis(lastAnalysis);
   }catch(e){toast("Analysis failed: "+e.message);}
   b.disabled=false;b.textContent="Analyze with Gemini";
@@ -632,12 +674,14 @@ function renderAnalysis(a){
 
 $("btnSaveMeal").addEventListener("click",async()=>{
   if(!lastAnalysis)return;
-  const body={meal_guess:lastAnalysis.meal_guess||"meal",portion_note:$("portionNote").value.trim(),source:"photo",confidence:Number(lastAnalysis.confidence||0),health_notes:lastAnalysis.health_notes||[],items:lastAnalysis.items||[],...(lastAnalysis.totals||{})};
+  const body={meal_guess:lastAnalysis.meal_guess||"meal",portion_note:$("portionNote").value.trim(),source:lastAnalysisSource,confidence:Number(lastAnalysis.confidence||0),health_notes:lastAnalysis.health_notes||[],items:lastAnalysis.items||[],...(lastAnalysis.totals||{})};
   await api("/api/meals",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   toast("Meal saved to recent meals");
   $("analysisResult").hidden=true;lastAnalysis=null;resetMealUpload();
   await loadMeals();loadDashboard();$("mealList").scrollIntoView({behavior:"smooth",block:"start"});
 });
+
+setMealInputMode("photo");
 
 const renderMealItem=item=>`
   <div class="meal-log-item">

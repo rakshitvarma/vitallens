@@ -370,6 +370,23 @@ async def analyze_meal(image: UploadFile=File(...), portion_note: str=Form(""), 
         raise HTTPException(503, gemini_client.user_facing_error(e)) from e
 
 
+class MealTextIn(BaseModel):
+    portion_note: str = ""
+
+
+@app.post("/api/meals/analyze-text")
+def analyze_meal_text(body: MealTextIn, user_id: str=Depends(get_user_id)):
+    portion_note = body.portion_note.strip()
+    if not portion_note:
+        raise HTTPException(400, "Describe what you ate before analyzing")
+    try:
+        return gemini_client.analyze_meal_text(portion_note)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e)) from e
+    except Exception as e:
+        raise HTTPException(503, gemini_client.user_facing_error(e)) from e
+
+
 class MealIn(BaseModel):
     date: str | None = None
     meal_guess: str = "meal"

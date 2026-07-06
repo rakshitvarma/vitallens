@@ -75,6 +75,40 @@ Respond with ONLY valid JSON, no markdown, matching exactly this schema:
   "health_notes": [str]       // max 3, short, specific to THIS meal
 }}"""
 
+MEAL_TEXT_PROMPT = """You are a clinical nutrition analyst for an Indian health platform.
+Analyze this typed meal description as the source of truth:
+"{portion_note}"
+
+Break it into distinct food items and realistic serving sizes. Prefer Indian food
+names where applicable (e.g., roti, dal tadka, jeera rice). If quantity is vague,
+estimate a normal serving and mention the uncertainty through portion wording.
+
+Respond with ONLY valid JSON, no markdown, matching exactly this schema:
+{{
+  "items": [
+    {{"name": str, "portion": str, "calories": number, "protein_g": number,
+      "carbs_g": number, "fat_g": number, "sugar_g": number, "fiber_g": number,
+      "sodium_mg": number, "salt_g": number}}
+  ],
+  "meal_guess": str,          // e.g. "lunch"
+  "confidence": number,       // 0-1 overall
+  "health_notes": [str]       // max 3, short, specific to THIS meal
+}}"""
+
+
+def _finalize_meal_analysis(data: dict) -> dict:
+    items = data.get("items", [])
+    for item in items:
+        if not item.get("salt_g") and item.get("sodium_mg"):
+            item["salt_g"] = round(float(item.get("sodium_mg") or 0) * 2.5 / 1000, 2)
+    data["totals"] = {
+        k: round(sum(float(i.get(k) or 0) for i in items), 1)
+        for k in ("calories", "protein_g", "carbs_g", "fat_g", "sugar_g", "fiber_g", "sodium_mg", "salt_g")
+    }
+    data["totals"]["sodium_mg"] = round(data["totals"]["sodium_mg"])
+    data["totals"]["salt_g"] = round(data["totals"]["salt_g"], 2)
+    return data
+
 
 def analyze_meal_image(image_bytes: bytes, mime_type: str, portion_note: str) -> dict:
     resp = client().models.generate_content(
@@ -87,18 +121,18 @@ def analyze_meal_image(image_bytes: bytes, mime_type: str, portion_note: str) ->
             response_mime_type="application/json", temperature=0.2
         ),
     )
-    data = json.loads(resp.text)
-    items = data.get("items", [])
-    for item in items:
-        if not item.get("salt_g") and item.get("sodium_mg"):
-            item["salt_g"] = round(float(item.get("sodium_mg") or 0) * 2.5 / 1000, 2)
-    data["totals"] = {
-        k: round(sum(float(i.get(k) or 0) for i in items), 1)
-        for k in ("calories", "protein_g", "carbs_g", "fat_g", "sugar_g", "fiber_g", "sodium_mg", "salt_g")
-    }
-    data["totals"]["sodium_mg"] = round(data["totals"]["sodium_mg"])
-    data["totals"]["salt_g"] = round(data["totals"]["salt_g"], 2)
-    return data
+    return _finalize_meal_analysis(json.loads(resp.text))
+
+
+def analyze_meal_text(portion_note: str) -> dict:
+    resp = client().models.generate_content(
+        model=MODEL,
+        contents=MEAL_TEXT_PROMPT.format(portion_note=portion_note),
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json", temperature=0.2
+        ),
+    )
+    return _finalize_meal_analysis(json.loads(resp.text))
 
 
 def weekly_insight(score_data: dict) -> str:
