@@ -1177,16 +1177,16 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:22px 18px 86
     position:fixed;
     left:50%;
     right:auto;
-    width:min(calc(100vw - 24px),390px);
-    max-width:390px;
+    width:min(calc(100vw - 16px),430px);
+    max-width:430px;
     min-width:0;
     bottom:10px;
     transform:translateX(-50%);
     z-index:40;
     display:grid;
     grid-template-columns:repeat(5,minmax(0,1fr));
-    gap:5px;
-    padding:7px;
+    gap:4px;
+    padding:6px;
     background:rgba(255,255,255,.94);
     border:1px solid var(--line);
     border-radius:12px;
@@ -1196,18 +1196,21 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:22px 18px 86
   body::before{opacity:.48}
   body::after{opacity:.5}
   #nav button{
+    width:100%;
     min-width:0;
     min-height:54px;
+    align-items:center;
     flex-direction:column;
     justify-content:center;
     gap:3px;
     color:var(--muted);
     border-radius:8px;
-    padding:6px 4px;
-    font-size:.68rem;
+    padding:6px 2px;
+    font-size:.66rem;
     line-height:1.1;
+    text-align:center;
   }
-  #nav button span{max-width:100%;overflow:hidden;text-overflow:clip}
+  #nav button span{width:100%;max-width:100%;overflow:hidden;text-overflow:clip;text-align:center}
   #nav button span{display:block}
   #nav button svg{width:20px;height:20px}
   #nav button.active{background:var(--pine);color:#fff;box-shadow:none}
