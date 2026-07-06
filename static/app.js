@@ -290,6 +290,75 @@ const comparisonRows=groups=>[
   r.enough_data?`${round(r.previous,r.unit==="mg"||r.unit==="kcal"||r.unit==="min"?0:1)} ${r.unit}`:"No baseline",
   r.enough_data&&r.change_pct!==null?`${r.change_pct>0?"+":""}${r.change_pct}%`:"-",
 ]);
+const pdfColor={
+  pine:[13,59,46],
+  pineDark:[8,34,27],
+  lime:[184,230,46],
+  lime2:[143,191,16],
+  sky:[26,167,200],
+  amber:[230,162,58],
+  coral:[217,82,69],
+  ink:[16,37,29],
+  muted:[96,117,108],
+  line:[216,229,220],
+  soft:[248,251,248],
+};
+const pdfRgb=(doc,color)=>doc.setTextColor(...color);
+const pdfFill=(doc,color)=>doc.setFillColor(...color);
+const pdfStroke=(doc,color)=>doc.setDrawColor(...color);
+const pdfScoreColor=score=>score>=70?pdfColor.lime:score>=45?pdfColor.amber:pdfColor.coral;
+const pdfAddPageIfNeeded=(doc,y,needed=120)=>{
+  if(y+needed>760){doc.addPage();return 44;}
+  return y;
+};
+const pdfSection=(doc,title,y)=>{
+  y=pdfAddPageIfNeeded(doc,y,54);
+  doc.setFont("helvetica","bold");doc.setFontSize(13);pdfRgb(doc,pdfColor.pine);
+  doc.text(title,40,y);
+  pdfStroke(doc,pdfColor.line);doc.setLineWidth(.8);doc.line(40,y+9,555,y+9);
+  return y+28;
+};
+const pdfMetricCard=(doc,x,y,w,label,value,accent=pdfColor.lime)=>{
+  pdfFill(doc,[255,255,255]);pdfStroke(doc,[207,223,213]);
+  doc.roundedRect(x,y,w,54,8,8,"FD");
+  pdfFill(doc,accent);doc.roundedRect(x,y,5,54,8,8,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(13);pdfRgb(doc,pdfColor.ink);
+  doc.text(String(value),x+14,y+22,{maxWidth:w-20});
+  doc.setFont("helvetica","normal");doc.setFontSize(8);pdfRgb(doc,pdfColor.muted);
+  doc.text(label,x+14,y+39,{maxWidth:w-20});
+};
+const pdfProgress=(doc,x,y,w,label,value,detail,accent=pdfColor.lime2)=>{
+  const score=pct(value);
+  doc.setFont("helvetica","bold");doc.setFontSize(9);pdfRgb(doc,pdfColor.ink);
+  doc.text(label,x,y);
+  doc.setFont("helvetica","normal");doc.setFontSize(8);pdfRgb(doc,pdfColor.muted);
+  doc.text(`${score}/100`,x+w-38,y);
+  pdfFill(doc,[235,242,238]);doc.roundedRect(x,y+8,w,7,3,3,"F");
+  pdfFill(doc,accent);doc.roundedRect(x,y+8,Math.max(5,w*score/100),7,3,3,"F");
+  pdfRgb(doc,pdfColor.muted);doc.text(detail,x,y+28,{maxWidth:w});
+};
+const pdfPill=(doc,x,y,label,color=pdfColor.lime2)=>{
+  pdfFill(doc,[241,247,239]);pdfStroke(doc,[216,229,220]);
+  doc.roundedRect(x,y,112,24,7,7,"FD");
+  pdfFill(doc,color);doc.circle(x+13,y+12,4,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(8);pdfRgb(doc,pdfColor.ink);
+  doc.text(label,x+24,y+15,{maxWidth:82});
+};
+const pdfTrendFallback=(doc,d,x,y,w,h)=>{
+  const rows=d.trend||[];
+  pdfFill(doc,[255,255,255]);pdfStroke(doc,pdfColor.line);doc.roundedRect(x,y,w,h,8,8,"FD");
+  if(!rows.length){pdfRgb(doc,pdfColor.muted);doc.text("No trend data available.",x+18,y+42);return;}
+  const maxCal=Math.max(1,...rows.map(r=>num(r.calories)),...rows.map(r=>num(r.calories_burned)));
+  const barW=Math.max(5,(w-40)/Math.max(rows.length,1)-4);
+  rows.forEach((row,i)=>{
+    const bx=x+20+i*(barW+4);
+    const calH=(h-42)*num(row.calories)/maxCal;
+    const burnH=(h-42)*num(row.calories_burned)/maxCal;
+    pdfFill(doc,pdfColor.pine);doc.rect(bx,y+h-24-calH,barW/2,calH,"F");
+    pdfFill(doc,pdfColor.sky);doc.rect(bx+barW/2+1,y+h-24-burnH,barW/2,burnH,"F");
+  });
+  pdfRgb(doc,pdfColor.muted);doc.setFontSize(7);doc.text("Calories vs calories burned",x+18,y+h-9);
+};
 const exportDashboardPdf=async()=>{
   const d=latestDashboard||await loadDashboard();
   if(!d){toast("Report unavailable");return;}
@@ -301,17 +370,80 @@ const exportDashboardPdf=async()=>{
   const movement=d.movement||{};
   const targets=d.targets||{};
   const period=d.period?.label||"Selected period";
-  const titleY=44;
-  doc.setFont("helvetica","bold");
-  doc.setFontSize(20);
-  doc.text("VitalLens Report",40,titleY);
-  doc.setFont("helvetica","normal");
-  doc.setFontSize(10);
-  doc.text(`${period} | VitalScore ${d.score} (${d.band})`,40,titleY+18);
-  const options={theme:"grid",styles:{fontSize:8,cellPadding:5},headStyles:{fillColor:[13,59,46],textColor:255},margin:{left:40,right:40}};
+  const scoreColor=pdfScoreColor(d.score);
+  pdfFill(doc,pdfColor.pineDark);doc.roundedRect(30,28,535,178,12,12,"F");
+  pdfFill(doc,pdfColor.lime);doc.rect(30,202,178,4,"F");
+  pdfFill(doc,pdfColor.sky);doc.rect(208,202,178,4,"F");
+  pdfFill(doc,pdfColor.amber);doc.rect(386,202,179,4,"F");
+  pdfStroke(doc,[72,104,90]);doc.setLineWidth(12);doc.circle(110,116,54,"S");
+  pdfStroke(doc,scoreColor);doc.setLineWidth(12);doc.circle(110,116,54,"S");
+  doc.setFont("helvetica","bold");doc.setFontSize(34);pdfRgb(doc,[255,255,255]);
+  doc.text(String(Math.round(d.score||0)),110,111,{align:"center"});
+  doc.setFontSize(9);pdfRgb(doc,[202,221,211]);doc.text(String(d.band||"VitalScore").toUpperCase(),110,132,{align:"center"});
+  doc.setFont("helvetica","bold");doc.setFontSize(24);pdfRgb(doc,[255,255,255]);
+  doc.text(dashboardPeriod==="month"?"Your month, summarized.":"Your week, summarized.",200,74);
+  doc.setFont("helvetica","normal");doc.setFontSize(11);pdfRgb(doc,[210,230,220]);
+  doc.text(`${period}: meals, movement and risk signals scored transparently.`,200,96,{maxWidth:325});
+  pdfMetricCard(doc,200,118,68,"kcal/day",food.daily_avg.calories||0,pdfColor.lime);
+  pdfMetricCard(doc,278,118,68,"active min",movement.active_minutes||0,pdfColor.sky);
+  pdfMetricCard(doc,356,118,68,"sugar/day",`${food.daily_avg.sugar_g||0}g`,pdfColor.amber);
+  pdfMetricCard(doc,434,118,82,"sodium/day",`${food.daily_avg.sodium_mg||0}mg`,pdfColor.coral);
+  let y=234;
+  y=pdfSection(doc,"Food intelligence",y);
+  pdfProgress(doc,42,y,150,"Calories balance",d.components?.calories||0,`${food.daily_avg.calories||0}/${round(targets.calories_per_day,0)} kcal`,pdfColor.lime2);
+  pdfProgress(doc,222,y,150,"Sugar control",d.components?.sugar||0,`${food.daily_avg.sugar_g||0}/${round(targets.sugar_g_per_day,0)} g`,pdfColor.amber);
+  pdfProgress(doc,402,y,130,"Sodium control",d.components?.sodium||0,`${food.daily_avg.sodium_mg||0}/${round(targets.sodium_mg_per_day,0)} mg`,pdfColor.coral);
+  y+=62;
+  const topFoods=(food.top_foods||[]).slice(0,4);
+  topFoods.forEach((item,i)=>pdfPill(doc,42+i*126,y,`${item.name} (${item.count}x)`,pdfColor.lime2));
+  y+=54;
+  y=pdfSection(doc,"Movement intelligence",y);
+  pdfProgress(doc,42,y,150,"Activity target",d.components?.activity||0,`${movement.active_minutes||0} active min`,pdfColor.sky);
+  pdfProgress(doc,222,y,150,"Workout consistency",d.components?.consistency||0,`${movement.workouts||0} workouts`,pdfColor.lime2);
+  pdfProgress(doc,402,y,130,"Calorie burn",Math.min(100,Math.round(num(movement.calories_burned)/1200*100)),`${movement.calories_burned||0} cal`,pdfColor.amber);
+  y+=62;
+  (movement.type_breakdown||[]).slice(0,4).forEach((item,i)=>pdfPill(doc,42+i*126,y,`${item.type}: ${item.minutes} min`,pdfColor.sky));
+  y+=54;
+  y=pdfSection(doc,"Risk signals and trend",y);
+  const signals=d.signals&&d.signals.length?d.signals:[{type:"none",level:"healthy",why:"No elevated risk signals."}];
+  signals.slice(0,3).forEach((s,i)=>{
+    const color=s.level==="elevated"?pdfColor.coral:s.level==="watch"?pdfColor.amber:pdfColor.lime2;
+    pdfPill(doc,42+i*164,y,String(s.type||"signal").replaceAll("_"," "),color);
+  });
+  y+=44;
+  try{
+    const canvas=$("trendChart");
+    if(canvas){
+      const img=canvas.toDataURL("image/png",1);
+      pdfFill(doc,[255,255,255]);pdfStroke(doc,pdfColor.line);doc.roundedRect(40,y,515,158,8,8,"FD");
+      doc.addImage(img,"PNG",56,y+16,483,112);
+      doc.setFont("helvetica","bold");doc.setFontSize(9);pdfRgb(doc,pdfColor.ink);
+      doc.text("Trend - calories, calories burned and active minutes",56,y+142);
+    }else{
+      pdfTrendFallback(doc,d,40,y,515,158);
+    }
+  }catch{
+    pdfTrendFallback(doc,d,40,y,515,158);
+  }
+  y+=190;
+  y=pdfSection(doc,"Day log markers",y);
+  (d.day_log||[]).slice(0,14).forEach((row,i)=>{
+    const x=42+(i%7)*72;
+    const yy=y+Math.floor(i/7)*46;
+    const color=row.status==="elevated"?pdfColor.coral:row.status==="watch"?pdfColor.amber:row.status==="healthy"?pdfColor.lime2:pdfColor.line;
+    pdfFill(doc,color);doc.circle(x,yy,5,"F");
+    doc.setFont("helvetica","bold");doc.setFontSize(8);pdfRgb(doc,pdfColor.ink);doc.text(fmtDate(row.date),x+10,yy+3);
+    doc.setFont("helvetica","normal");doc.setFontSize(7);pdfRgb(doc,pdfColor.muted);doc.text(`${row.calories} kcal | ${row.active_min} min`,x+10,yy+14,{maxWidth:58});
+  });
+  doc.addPage();
+  doc.setFont("helvetica","bold");doc.setFontSize(18);pdfRgb(doc,pdfColor.pine);
+  doc.text("Detailed tabular data",40,48);
+  doc.setFont("helvetica","normal");doc.setFontSize(9);pdfRgb(doc,pdfColor.muted);
+  doc.text("The following tables contain the source metrics used in the report visuals.",40,66);
+  const options={theme:"grid",styles:{fontSize:8,cellPadding:5,textColor:pdfColor.ink},headStyles:{fillColor:pdfColor.pine,textColor:255},alternateRowStyles:{fillColor:pdfColor.soft},margin:{left:40,right:40}};
   doc.autoTable({
     ...options,
-    startY:84,
+    startY:88,
     head:[["Metric","Value"]],
     body:[
       ["Average calories/day",`${food.daily_avg.calories||0} kcal`],
