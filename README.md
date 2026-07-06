@@ -47,12 +47,18 @@ gcloud run services update vitallens --region asia-south1 \
 
 ## Google sign-in
 
-Preferred setup for this hackathon app: use Google Identity Services directly.
-This avoids Supabase redirect/callback configuration entirely.
+The app uses Google Identity Services directly. There is no Supabase auth layer.
 
 ```bash
 gcloud run services update vitallens --region asia-south1 \
   --update-env-vars GOOGLE_CLIENT_ID=YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com
+```
+
+If the service previously had Supabase auth variables, remove them:
+
+```bash
+gcloud run services update vitallens --region asia-south1 \
+  --remove-env-vars AUTH_PROVIDER,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_JWT_SECRET,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY
 ```
 
 In the Google Cloud Console OAuth client, add:
@@ -62,34 +68,6 @@ In the Google Cloud Console OAuth client, add:
 The browser receives a Google ID token and the API verifies it server-side against
 `GOOGLE_CLIENT_ID`. The user id stored in Firestore/local JSON is `google:<sub>`,
 where `sub` is Google's stable account identifier.
-
-### Supabase Auth alternative
-
-The app uses Supabase Auth as the Google sign-in broker. Cloud Run must expose
-both public Supabase browser values to the SPA:
-
-```bash
-gcloud run services update vitallens --region asia-south1 \
-  --update-env-vars AUTH_PROVIDER=supabase,SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co,SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY
-```
-
-`SUPABASE_JWT_SECRET` is optional. If it is absent, the API verifies the browser's
-Supabase access token against Supabase Auth. If only `SUPABASE_JWT_SECRET` is set
-without `SUPABASE_URL` and `SUPABASE_ANON_KEY`, the app intentionally falls back
-to demo mode instead of showing `Dashboard: Missing Authorization header`.
-If both direct Google and Supabase credentials exist on Cloud Run, `AUTH_PROVIDER=supabase`
-forces the Supabase flow.
-
-Configure the provider allowlists:
-
-1. Supabase Dashboard -> Authentication -> URL Configuration:
-   - Site URL: `https://YOUR-SERVICE-URL.run.app`
-   - Redirect URL: `https://YOUR-SERVICE-URL.run.app/`
-2. Supabase Dashboard -> Authentication -> Providers -> Google:
-   - Enable Google and paste the Google OAuth Client ID and Client Secret.
-3. Google Cloud Console -> APIs & Services -> Credentials -> OAuth client:
-   - Authorized JavaScript origin: `https://YOUR-SERVICE-URL.run.app`
-   - Authorized redirect URI: `https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`
 
 ## Strava activity sync
 

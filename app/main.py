@@ -10,12 +10,8 @@ from app import gemini_client, scoring, storage
 from app.auth import (
     AUTH_CONFIG_ERROR,
     AUTH_CONFIGURED,
-    AUTH_PARTIAL,
     AUTH_PROVIDER,
     GOOGLE_CLIENT_ID,
-    SUPABASE_ANON_KEY,
-    SUPABASE_CONFIGURED,
-    SUPABASE_URL,
     get_user_id,
 )
 
@@ -33,12 +29,9 @@ def health(): return {"ok": True}
 def config():
     return {
         "auth_provider": AUTH_PROVIDER,
-        "google_client_id": GOOGLE_CLIENT_ID if AUTH_PROVIDER == "google" else "",
-        "supabase_url": SUPABASE_URL if AUTH_PROVIDER == "supabase" and SUPABASE_CONFIGURED else "",
-        "supabase_anon_key": SUPABASE_ANON_KEY if AUTH_PROVIDER == "supabase" and SUPABASE_CONFIGURED else "",
+        "google_client_id": GOOGLE_CLIENT_ID if AUTH_CONFIGURED else "",
         "strava_enabled": bool(STRAVA_ID),
         "auth_enabled": AUTH_CONFIGURED,
-        "auth_partial": AUTH_PARTIAL,
         "auth_error": AUTH_CONFIG_ERROR,
     }
 

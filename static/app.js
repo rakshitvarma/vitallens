@@ -1,12 +1,6 @@
 /* VitalLens SPA */
-let _supabase=null,_user=null,_token=null;
+let _user=null,_token=null;
 let _stravaConnected=false;
-
-const redirectMessage=()=>{
-  const query=new URLSearchParams(location.search);
-  const hash=new URLSearchParams((location.hash||"").replace(/^#/,""));
-  return query.get("error_description")||hash.get("error_description")||query.get("error")||hash.get("error")||"";
-};
 
 const cleanAuthUrl=()=>{
   const params=new URLSearchParams(location.search);
@@ -26,11 +20,43 @@ const showAuthScreen=(message="")=>{
   }
 };
 
+const storageGet=(key)=>{
+  try{return sessionStorage.getItem(key);}
+  catch{return null;}
+};
+const storageSet=(key,value)=>{
+  try{sessionStorage.setItem(key,value);}
+  catch{}
+};
+const storageRemove=(key)=>{
+  try{sessionStorage.removeItem(key);}
+  catch{}
+};
+const localId=()=>{
+  try{
+    const existing=localStorage.getItem("vl_uid");
+    if(existing) return existing;
+    const id=crypto.randomUUID();
+    localStorage.setItem("vl_uid",id);
+    return id;
+  }catch{
+    return crypto.randomUUID();
+  }
+};
+
 const startGuestSession=()=>{
-  const id=localStorage.getItem("vl_uid")||(()=>{const i=crypto.randomUUID();localStorage.setItem("vl_uid",i);return i;})();
+  const id=localId();
   _token=null;
   _user={id,email:"dev@local",user_metadata:{full_name:"Demo User",avatar_url:""}};
   showApp();
+};
+
+const clearGoogleSession=()=>{
+  _token=null;
+  _user=null;
+  storageRemove("vl_google_token");
+  storageRemove("vl_google_user");
+  window.google?.accounts?.id?.disableAutoSelect();
 };
 
 const handleReturnParams=()=>{
@@ -65,18 +91,16 @@ const waitForGoogle=()=>new Promise(resolve=>{
 });
 
 async function initGoogleAuth(clientId){
-  const savedToken=sessionStorage.getItem("vl_google_token");
-  const savedUser=sessionStorage.getItem("vl_google_user");
+  const savedToken=storageGet("vl_google_token");
+  const savedUser=storageGet("vl_google_user");
   if(savedToken&&savedUser&&!isJwtExpired(savedToken)){
     _token="google:"+savedToken;
     _user=JSON.parse(savedUser);
     showApp();
     return;
   }
-  sessionStorage.removeItem("vl_google_token");
-  sessionStorage.removeItem("vl_google_user");
+  clearGoogleSession();
   showAuthScreen();
-  document.getElementById("btnGoogleLogin").hidden=true;
   const host=document.getElementById("googleButton");
   host.hidden=false;
   host.innerHTML="";
@@ -92,14 +116,14 @@ async function initGoogleAuth(clientId){
         return;
       }
       const claims=parseJwtPayload(response.credential);
-      _token="google:"+response.credential;
+      _token=response.credential;
       _user={
         id:"google:"+claims.sub,
         email:claims.email,
         user_metadata:{full_name:claims.name||claims.email||"User",avatar_url:claims.picture||""}
       };
-      sessionStorage.setItem("vl_google_token",response.credential);
-      sessionStorage.setItem("vl_google_user",JSON.stringify(_user));
+      storageSet("vl_google_token",response.credential);
+      storageSet("vl_google_user",JSON.stringify(_user));
       cleanAuthUrl();
       showApp();
     },
@@ -107,7 +131,6 @@ async function initGoogleAuth(clientId){
     use_fedcm_for_prompt:true
   });
   window.google.accounts.id.renderButton(host,{theme:"outline",size:"large",text:"continue_with",shape:"pill",width:320});
-  window.google.accounts.id.prompt();
 }
 
 async function initAuth(){
@@ -117,51 +140,15 @@ async function initAuth(){
     showAuthScreen("Could not load app configuration. Please refresh and try again.");
     return;
   }
-  if(cfg.auth_partial){
-    showAuthScreen(cfg.auth_error||"Supabase auth is partially configured.");
-    document.getElementById("btnGoogleLogin").disabled=true;
-    return;
-  }
-  if(cfg.auth_provider==="google"){
-    await initGoogleAuth(cfg.google_client_id);
-    return;
-  }
   if(!cfg.auth_enabled){
     startGuestSession();
     return;
   }
-  if(!window.supabase){
-    showAuthScreen("Supabase client failed to load. Check the network and refresh.");
+  if(!cfg.google_client_id){
+    showAuthScreen(cfg.auth_error||"Google sign-in is not configured.");
     return;
   }
-  const loginError=redirectMessage();
-  _supabase=window.supabase.createClient(cfg.supabase_url,cfg.supabase_anon_key,{
-    auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
-  });
-  _supabase.auth.onAuthStateChange((_e,s)=>{
-    _token=s?.access_token||null;
-    _user=s?.user||null;
-    if(s&&document.getElementById("appShell").hidden) showApp();
-  });
-  const{data:{session},error}=await _supabase.auth.getSession();
-  if(error){
-    showAuthScreen(error.message);
-    return;
-  }
-  if(session){
-    _token=session.access_token;_user=session.user;cleanAuthUrl();showApp();
-  } else {
-    showAuthScreen(loginError);
-    if(loginError) cleanAuthUrl();
-    document.getElementById("btnGoogleLogin").disabled=false;
-    document.getElementById("btnGoogleLogin").onclick=async()=>{
-      const{error}=await _supabase.auth.signInWithOAuth({
-        provider:"google",
-        options:{redirectTo:location.origin+"/"}
-      });
-      if(error) showAuthScreen(error.message);
-    };
-  }
+  await initGoogleAuth(cfg.google_client_id);
 }
 
 function showApp(){
@@ -172,10 +159,7 @@ function showApp(){
   const av=document.getElementById("userAvatar");
   if(u.user_metadata?.avatar_url){av.src=u.user_metadata.avatar_url;av.hidden=false;}
   document.getElementById("btnSignOut").onclick=async()=>{
-    if(_supabase) await _supabase.auth.signOut();
-    sessionStorage.removeItem("vl_google_token");
-    sessionStorage.removeItem("vl_google_user");
-    window.google?.accounts?.id?.disableAutoSelect();
+    clearGoogleSession();
     location.reload();
   };
   loadDashboard();
@@ -187,7 +171,14 @@ const api=async(path,opts={})=>{
   if(_token) headers["Authorization"]="Bearer "+_token;
   else headers["X-User-Id"]=_user?.id||"dev";
   const r=await fetch(path,{...opts,headers});
-  if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText);
+  if(!r.ok){
+    const message=(await r.json().catch(()=>({}))).detail||r.statusText;
+    if(r.status===401&&_token){
+      clearGoogleSession();
+      showAuthScreen(message);
+    }
+    throw new Error(message);
+  }
   return r.json();
 };
 

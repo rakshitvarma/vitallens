@@ -28,9 +28,7 @@ echo "--- Configuration ---"
 
 read -p "Google Cloud Project ID: " GCP_PROJECT
 read -p "Gemini API Key (from aistudio.google.com/apikey): " GEMINI_KEY
-read -p "Google OAuth Web Client ID for sign-in (leave blank to use Supabase/demo): " GOOGLE_CLIENT_ID
-read -p "Supabase URL (https://PROJECT.supabase.co, leave blank for demo mode): " SUPABASE_URL
-read -p "Supabase anon/publishable key (leave blank for demo mode): " SUPABASE_ANON_KEY
+read -p "Google OAuth Web Client ID for sign-in (leave blank for demo mode): " GOOGLE_CLIENT_ID
 read -p "Strava Client ID (leave blank to skip): " STRAVA_ID
 read -p "Strava Client Secret (leave blank to skip): " STRAVA_SECRET
 read -p "GitHub repo URL (e.g. https://github.com/you/vitallens.git): " GITHUB_URL
@@ -67,12 +65,6 @@ echo "Deploying to Cloud Run (this takes 2-4 minutes)..."
 ENV_VARS="GEMINI_API_KEY=${GEMINI_KEY}"
 if [ -n "$GOOGLE_CLIENT_ID" ]; then
     ENV_VARS="${ENV_VARS},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}"
-fi
-if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
-    ENV_VARS="${ENV_VARS},SUPABASE_URL=${SUPABASE_URL},SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}"
-elif [ -n "$SUPABASE_URL" ] || [ -n "$SUPABASE_ANON_KEY" ]; then
-    echo "Supabase URL and anon key must be provided together."
-    exit 1
 fi
 if [ -n "$STRAVA_ID" ]; then
     ENV_VARS="${ENV_VARS},STRAVA_CLIENT_ID=${STRAVA_ID},STRAVA_CLIENT_SECRET=${STRAVA_SECRET}"
@@ -130,18 +122,9 @@ echo "  Set Authorization Callback Domain to:"
 DOMAIN=$(echo "$SERVICE_URL" | sed 's|https://||')
 echo "  $DOMAIN"
 echo ""
-echo "--- For Google sign-in via Supabase (optional) ---"
-echo "  Direct Google sign-in needs only:"
+echo "--- For Google sign-in ---"
 echo "    GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-YOUR-GOOGLE-WEB-CLIENT-ID}"
 echo "    Authorized JavaScript origin: ${SERVICE_URL}"
-echo ""
-echo "  Supabase Auth alternative:"
-echo "  Supabase Auth > URL Configuration:"
-echo "    Site URL: ${SERVICE_URL}"
-echo "    Redirect URL: ${SERVICE_URL}/"
-echo "  Google Cloud OAuth client:"
-echo "    Authorized JavaScript origin: ${SERVICE_URL}"
-echo "    Authorized redirect URI: https://YOUR-SUPABASE-PROJECT.supabase.co/auth/v1/callback"
 echo ""
 echo "--- Quick test ---"
 echo "  curl $SERVICE_URL/api/health"
