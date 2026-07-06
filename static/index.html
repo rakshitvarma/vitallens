@@ -3,27 +3,29 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>VitalLens - AI Decision Intelligence for Everyday Health</title>
+<title>VitalLens</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
 <link rel="stylesheet" href="/static/style.css"/>
 </head>
 <body>
 <div id="appShell" hidden>
 <header class="topbar">
-  <div class="brand">
+  <button class="brand" id="brandHome" type="button" aria-label="Go to dashboard">
     <span class="lens"></span>
     <span class="brand-wordmark">VitalLens</span>
     <svg class="brand-leaves" viewBox="0 0 28 26" aria-hidden="true" focusable="false">
       <path class="leaf leaf-main" d="M14.8 23.5C10.8 18.6 10.6 13.6 14.1 9.8C16.8 6.9 21.1 5.9 25 5.8C25 9.7 23.7 14.1 20.7 17.2C18.9 19.2 16.9 20.7 14.8 23.5Z"/>
       <path class="leaf leaf-small" d="M7.2 18.5C4 14.8 3.9 11.1 6.5 8.1C8.6 5.8 11.7 4.9 14.5 4.9C14.4 7.9 13.4 11.2 11.1 13.8C9.7 15.3 8.5 16.5 7.2 18.5Z"/>
     </svg>
-  </div>
+  </button>
   <nav id="nav">
     <button data-tab="dashboard" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v7H4zM13 5h7v4h-7zM13 11h7v8h-7zM4 14h7v5H4z"/></svg><span>Dashboard</span></button>
-    <button data-tab="meal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v8M11 3v8M7 11c0 2 4 2 4 0M9 11v10M16 4v17M16 4c3 2 4 5 3 8h-3"/></svg><span>Log Meal</span></button>
-    <button data-tab="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM10 8l-2 5 4 2 2 5M12 10l4 3 3-1M8 13l-3 6"/></svg><span>Activity</span></button>
+    <button data-tab="meal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v8M11 3v8M7 11c0 2 4 2 4 0M9 11v10M16 4v17M16 4c3 2 4 5 3 8h-3"/></svg><span>Meals</span></button>
+    <button data-tab="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5a2 2 0 1 0-4 0 2 2 0 0 0 4 0zM10 8l-2 5 4 2 2 5M12 10l4 3 3-1M8 13l-3 6"/></svg><span>Movement</span></button>
     <button data-tab="coach"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14v10H8l-3 3zM8 10h8M8 13h5"/></svg><span>Coach</span></button>
     <button data-tab="community"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 20c0-4 8-4 8 0M12 20c0-4 8-4 8 0"/></svg><span>Community</span></button>
   </nav>
@@ -31,6 +33,7 @@
     <img id="userAvatar" class="avatar" src="" alt="" hidden/>
     <span id="userName"></span>
   </div>
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark mode">Dark</button>
 </header>
 <main>
 <section id="tab-dashboard" class="tab active">
@@ -39,13 +42,17 @@
       <span class="eyebrow">Analytics period</span>
       <h2 id="periodLabel">This week</h2>
     </div>
-    <div class="period-controls" aria-label="Dashboard period controls">
-      <button class="icon-btn" id="prevPeriod" aria-label="Previous period">&lsaquo;</button>
-      <div class="segmented" role="group" aria-label="Period">
-        <button id="periodWeek" class="active" data-period="week">Week</button>
-        <button id="periodMonth" data-period="month">Month</button>
+    <div class="dashboard-actions">
+      <div class="period-controls" aria-label="Dashboard period controls">
+        <button class="icon-btn" id="prevPeriod" aria-label="Previous period">&lsaquo;</button>
+        <div class="segmented" role="group" aria-label="Period">
+          <button id="periodWeek" class="active" data-period="week">Week</button>
+          <button id="periodMonth" data-period="month">Month</button>
+        </div>
+        <label class="date-control" for="periodDate"><span>Date</span><input type="date" id="periodDate"/></label>
+        <button class="icon-btn" id="nextPeriod" aria-label="Next period">&rsaquo;</button>
       </div>
-      <button class="icon-btn" id="nextPeriod" aria-label="Next period">&rsaquo;</button>
+      <button class="btn ghost export-btn" id="btnExportPdf" type="button">Export PDF</button>
     </div>
   </div>
   <div class="hero">
@@ -109,11 +116,17 @@
   <div class="card insight-card" id="insightCard" hidden><h3>Gemini weekly insight</h3><p id="insightText"></p></div>
 </section>
 <section id="tab-meal" class="tab">
-  <div class="card page-dashboard">
-    <h2>Food target dashboard</h2>
-    <p class="sub">Selected-period nutrition progress updates from your logged meals.</p>
-    <div class="metric-grid" id="mealFocusMetrics"></div>
-    <div class="balance-list" id="mealFocusBalance"></div>
+  <div class="focus-hero meal-focus">
+    <div class="focus-ring-wrap">
+      <svg viewBox="0 0 200 200" class="ring"><circle cx="100" cy="100" r="86" class="ring-bg"/><circle cx="100" cy="100" r="86" class="ring-fg" id="mealRingFg"/></svg>
+      <div class="ring-center"><div class="score" id="mealScoreNum">-</div><div class="band" id="mealScoreBand">Food balance</div></div>
+    </div>
+    <div class="focus-hero-side">
+      <h1 id="mealFocusTitle">Your meals, decoded.</h1>
+      <p class="sub" id="mealFocusSub">Nutrition progress against your selected-period targets.</p>
+      <div class="stat-row" id="mealFocusStats"></div>
+      <div class="focus-meter-row" id="mealFocusBalance"></div>
+    </div>
   </div>
   <div class="card">
     <h2>Snap it. We'll count it.</h2>
@@ -137,11 +150,17 @@
   <div class="card"><h3>Recent meals</h3><div id="mealList"></div></div>
 </section>
 <section id="tab-activity" class="tab">
-  <div class="card page-dashboard">
-    <h2>Activity target dashboard</h2>
-    <p class="sub">Selected-period movement progress updates from manual logs and Strava syncs.</p>
-    <div class="metric-grid" id="activityFocusMetrics"></div>
-    <div class="balance-list" id="activityFocusBalance"></div>
+  <div class="focus-hero movement-focus">
+    <div class="focus-ring-wrap">
+      <svg viewBox="0 0 200 200" class="ring"><circle cx="100" cy="100" r="86" class="ring-bg"/><circle cx="100" cy="100" r="86" class="ring-fg" id="activityRingFg"/></svg>
+      <div class="ring-center"><div class="score" id="activityScoreNum">-</div><div class="band" id="activityScoreBand">Movement</div></div>
+    </div>
+    <div class="focus-hero-side">
+      <h1 id="activityFocusTitle">Your movement, decoded.</h1>
+      <p class="sub" id="activityFocusSub">Movement progress from manual logs and Strava syncs.</p>
+      <div class="stat-row" id="activityFocusStats"></div>
+      <div class="focus-meter-row" id="activityFocusBalance"></div>
+    </div>
   </div>
   <div class="grid2">
     <div class="card">

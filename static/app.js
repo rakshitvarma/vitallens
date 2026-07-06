@@ -9,6 +9,7 @@ let lastActivities=[];
 let editingMealId=null;
 let editingActivityId=null;
 let latestDashboard=null;
+const THEME_KEY="vitallens_theme";
 
 const $=id=>document.getElementById(id);
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[ch]));
@@ -21,6 +22,10 @@ const toIsoDate=date=>{
   d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
   return d.toISOString().slice(0,10);
 };
+const parseIsoDate=value=>{
+  const d=new Date(`${value}T00:00:00`);
+  return Number.isNaN(d.getTime())?new Date():d;
+};
 const fmtDate=value=>{
   if(!value)return "";
   const d=new Date(`${String(value).slice(0,10)}T00:00:00`);
@@ -28,6 +33,28 @@ const fmtDate=value=>{
 };
 const fmtDistance=m=>num(m)>=1000?`${round(num(m)/1000,1)} km`:`${Math.round(num(m))} m`;
 const toast=msg=>{const t=document.createElement("div");t.className="toast";t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2800);};
+const applyChartTheme=()=>{
+  if(!window.Chart)return;
+  Chart.defaults.color=document.body.dataset.theme==="dark"?"#cfe2d8":"#60756c";
+  Chart.defaults.borderColor=document.body.dataset.theme==="dark"?"rgba(255,255,255,.12)":"rgba(16,37,29,.10)";
+  trendChart?.update();
+};
+const setTheme=theme=>{
+  const selected=theme==="dark"?"dark":"light";
+  document.body.dataset.theme=selected;
+  localStorage.setItem(THEME_KEY,selected);
+  const btn=$("themeToggle");
+  if(btn){
+    btn.textContent=selected==="dark"?"Light":"Dark";
+    btn.setAttribute("aria-label",selected==="dark"?"Switch to light mode":"Switch to dark mode");
+  }
+  applyChartTheme();
+};
+const initTheme=()=>{
+  const saved=localStorage.getItem(THEME_KEY);
+  const prefersDark=window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  setTheme(saved||(prefersDark?"dark":"light"));
+};
 
 const localId=()=>{
   try{
@@ -93,16 +120,20 @@ const animateNumber=(el,to,duration=650)=>{
   requestAnimationFrame(tick);
 };
 
-document.body.dataset.activeTab="dashboard";
-document.querySelectorAll("#nav button").forEach(b=>b.addEventListener("click",()=>{
+const activateTab=tab=>{
   document.querySelectorAll("#nav button,.tab").forEach(el=>el.classList.remove("active"));
-  b.classList.add("active");$("tab-"+b.dataset.tab).classList.add("active");
-  document.body.dataset.activeTab=b.dataset.tab;
-  if(b.dataset.tab==="dashboard")loadDashboard();
-  if(b.dataset.tab==="meal"){loadDashboard();loadMeals();}
-  if(b.dataset.tab==="activity"){loadDashboard();loadActivities();}
-  if(b.dataset.tab==="community")loadCommunity();
-}));
+  const navButton=document.querySelector(`#nav button[data-tab="${tab}"]`);
+  navButton?.classList.add("active");
+  $("tab-"+tab)?.classList.add("active");
+  document.body.dataset.activeTab=tab;
+  if(tab==="dashboard")loadDashboard();
+  if(tab==="meal"){loadDashboard();loadMeals();}
+  if(tab==="activity"){loadDashboard();loadActivities();}
+  if(tab==="community")loadCommunity();
+};
+
+document.body.dataset.activeTab="dashboard";
+document.querySelectorAll("#nav button").forEach(b=>b.addEventListener("click",()=>activateTab(b.dataset.tab)));
 
 const nutritionFields=[
   ["calories","kcal","Calories",0],
@@ -148,6 +179,24 @@ const meter=(label,value,detail="")=>`
     <div class="balance-foot"><span>${levelForScore(value)}</span><span>${escapeHtml(detail)}</span></div>
   </div>
 `;
+const miniMeter=(label,value,detail="")=>`
+  <div class="mini-meter">
+    <div class="mini-meter-head"><span>${escapeHtml(label)}</span><b>${pct(value)}/100</b></div>
+    <div class="mini-meter-track"><i style="width:${pct(value)}%"></i></div>
+    <div class="mini-meter-foot">${escapeHtml(detail)}</div>
+  </div>
+`;
+const setFocusRing=(kind,score)=>{
+  const value=pct(score);
+  const ring=$(kind==="meal"?"mealRingFg":"activityRingFg");
+  const scoreEl=$(kind==="meal"?"mealScoreNum":"activityScoreNum");
+  const bandEl=$(kind==="meal"?"mealScoreBand":"activityScoreBand");
+  if(!ring||!scoreEl||!bandEl)return;
+  ring.style.strokeDashoffset=540-(540*value)/100;
+  ring.style.stroke=value>=70?"var(--lime)":value>=45?"var(--amber)":"var(--coral)";
+  scoreEl.textContent=value;
+  bandEl.textContent=value>=70?(kind==="meal"?"Balanced":"On track"):value>=45?"Watch":"Needs attention";
+};
 
 const signalIcon=type=>{
   const icons={
@@ -210,6 +259,110 @@ const renderDayLog=rows=>(rows||[]).map(row=>`
   </div>
 `).join("");
 
+const tableValue=value=>value===undefined||value===null||value===""?"-":String(value);
+const componentRows=components=>Object.entries(components||{}).map(([key,value])=>[
+  key.replaceAll("_"," "),
+  `${round(value,0)}/100`,
+  levelForScore(value),
+]);
+const comparisonRows=groups=>[
+  ...(groups?.previous_period||[]).map(r=>["Previous period",r]),
+  ...(groups?.previous_month_average||[]).map(r=>["Previous month avg",r]),
+].map(([group,r])=>[
+  group,
+  r.label,
+  `${round(r.current,r.unit==="mg"||r.unit==="kcal"||r.unit==="min"?0:1)} ${r.unit}`,
+  r.enough_data?`${round(r.previous,r.unit==="mg"||r.unit==="kcal"||r.unit==="min"?0:1)} ${r.unit}`:"No baseline",
+  r.enough_data&&r.change_pct!==null?`${r.change_pct>0?"+":""}${r.change_pct}%`:"-",
+]);
+const exportDashboardPdf=async()=>{
+  const d=latestDashboard||await loadDashboard();
+  if(!d){toast("Report unavailable");return;}
+  const jsPDF=window.jspdf?.jsPDF;
+  if(!jsPDF){toast("PDF tools are still loading");return;}
+  const doc=new jsPDF({unit:"pt",format:"a4"});
+  if(!doc.autoTable){toast("PDF table tools are still loading");return;}
+  const food=d.food||{daily_avg:{},top_foods:[]};
+  const movement=d.movement||{};
+  const targets=d.targets||{};
+  const period=d.period?.label||"Selected period";
+  const titleY=44;
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(20);
+  doc.text("VitalLens Report",40,titleY);
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(10);
+  doc.text(`${period} | VitalScore ${d.score} (${d.band})`,40,titleY+18);
+  const options={theme:"grid",styles:{fontSize:8,cellPadding:5},headStyles:{fillColor:[13,59,46],textColor:255},margin:{left:40,right:40}};
+  doc.autoTable({
+    ...options,
+    startY:84,
+    head:[["Metric","Value"]],
+    body:[
+      ["Average calories/day",`${food.daily_avg.calories||0} kcal`],
+      ["Active minutes",`${movement.active_minutes||0} min`],
+      ["Sugar/day",`${food.daily_avg.sugar_g||0} g`],
+      ["Sodium/day",`${food.daily_avg.sodium_mg||0} mg`],
+      ["Days logged",`${food.days_logged||0}/${d.period?.days||7}`],
+    ],
+  });
+  doc.autoTable({
+    ...options,
+    startY:doc.lastAutoTable.finalY+18,
+    head:[["Food metric","Current","Target"]],
+    body:[
+      ["Calories/day",`${food.daily_avg.calories||0} kcal`,`${round(targets.calories_per_day,0)} kcal`],
+      ["Protein/day",`${food.daily_avg.protein_g||0} g`,`${round(targets.protein_g_per_day,0)} g`],
+      ["Carbs/day",`${food.daily_avg.carbs_g||0} g`,"-"],
+      ["Sugar/day",`${food.daily_avg.sugar_g||0} g`,`${round(targets.sugar_g_per_day,0)} g max`],
+      ["Fiber/day",`${food.daily_avg.fiber_g||0} g`,`${round(targets.fiber_g_per_day,0)} g`],
+      ["Sodium/day",`${food.daily_avg.sodium_mg||0} mg`,`${round(targets.sodium_mg_per_day,0)} mg max`],
+      ["Meals logged",food.meal_count||0,"-"],
+    ],
+  });
+  doc.autoTable({
+    ...options,
+    startY:doc.lastAutoTable.finalY+18,
+    head:[["Movement metric","Current","Target"]],
+    body:[
+      ["Active minutes",`${movement.active_minutes||0} min`,`${round(targets.activity_minutes_for_period||targets.activity_min_per_week,0)} min`],
+      ["Steps",movement.steps||0,`${round(num(targets.steps_per_day)*(d.period?.days||7),0)} steps`],
+      ["Workouts",movement.workouts||0,"-"],
+      ["Calories burned",movement.calories_burned||0,`${round(num(targets.calories_burned_per_week)*(d.period?.days||7)/7,0)}`],
+      ["Distance",fmtDistance(movement.distance_m||0),fmtDistance(num(targets.distance_m_per_week)*(d.period?.days||7)/7)],
+      ["Average heart rate",movement.average_heartrate?`${movement.average_heartrate} bpm`:"-","-"],
+    ],
+  });
+  doc.autoTable({
+    ...options,
+    startY:doc.lastAutoTable.finalY+18,
+    head:[["Component","Score","Status"]],
+    body:componentRows(d.components),
+  });
+  const comparisons=comparisonRows(d.comparisons);
+  doc.autoTable({
+    ...options,
+    startY:doc.lastAutoTable.finalY+18,
+    head:[["Comparison","Metric","Current","Baseline","Change"]],
+    body:comparisons.length?comparisons:[["-","Insufficient comparison data","-","-","-"]],
+  });
+  doc.autoTable({
+    ...options,
+    startY:doc.lastAutoTable.finalY+18,
+    head:[["Date","Calories","Active min","Steps","Meals","Activities","Notes"]],
+    body:(d.day_log||[]).map(row=>[
+      tableValue(row.date),
+      tableValue(row.calories),
+      tableValue(row.active_min),
+      tableValue(row.steps),
+      tableValue(row.meals),
+      tableValue(row.activities),
+      tableValue([...(row.meal_names||[]),...(row.activity_names||[])].slice(0,3).join(" / ")),
+    ]),
+  });
+  doc.save(`VitalLens-report-${toIsoDate(dashboardAnchor)}.pdf`);
+};
+
 const setTargetForm=targets=>{
   if(!$("targetCalories"))return;
   $("targetCalories").value=round(targets.calories_per_day,0);
@@ -240,35 +393,47 @@ const renderFocusDashboards=d=>{
   const movement=d.movement||{};
   const targets=d.targets||{};
   const periodDays=d.period?.days||7;
-  if($("mealFocusMetrics")){
-    $("mealFocusMetrics").innerHTML=renderMetricGrid([
-      {value:`${food.daily_avg.calories||0}`,label:`kcal/day of ${round(targets.calories_per_day,0)}`},
-      {value:`${food.daily_avg.sugar_g||0}g`,label:`sugar max ${round(targets.sugar_g_per_day,0)}g`},
-      {value:`${food.daily_avg.sodium_mg||0}mg`,label:`sodium max ${round(targets.sodium_mg_per_day,0)}mg`},
-      {value:`${food.meal_count||0}`,label:"meals logged"},
-    ]);
-    $("mealFocusBalance").innerHTML=[
-      meter("Daily calories",calorieBalance(num(food.daily_avg.calories),num(targets.calories_per_day)),`${food.daily_avg.calories||0}/${round(targets.calories_per_day,0)} kcal`),
-      meter("Sugar limit",goalProgress(num(food.daily_avg.sugar_g),num(targets.sugar_g_per_day),true),`${food.daily_avg.sugar_g||0}/${round(targets.sugar_g_per_day,0)}g`),
-      meter("Sodium limit",goalProgress(num(food.daily_avg.sodium_mg),num(targets.sodium_mg_per_day),true),`${food.daily_avg.sodium_mg||0}/${round(targets.sodium_mg_per_day,0)}mg`),
-      meter("Protein target",goalProgress(num(food.daily_avg.protein_g),num(targets.protein_g_per_day)),`${food.daily_avg.protein_g||0}/${round(targets.protein_g_per_day,0)}g`),
-      meter("Fiber target",goalProgress(num(food.daily_avg.fiber_g),num(targets.fiber_g_per_day)),`${food.daily_avg.fiber_g||0}/${round(targets.fiber_g_per_day,0)}g`),
-    ].join("");
+  if($("mealFocusStats")){
+    const foodMeters=[
+      ["Calories",calorieBalance(num(food.daily_avg.calories),num(targets.calories_per_day)),`${food.daily_avg.calories||0}/${round(targets.calories_per_day,0)} kcal`],
+      ["Sugar",goalProgress(num(food.daily_avg.sugar_g),num(targets.sugar_g_per_day),true),`${food.daily_avg.sugar_g||0}/${round(targets.sugar_g_per_day,0)}g`],
+      ["Sodium",goalProgress(num(food.daily_avg.sodium_mg),num(targets.sodium_mg_per_day),true),`${food.daily_avg.sodium_mg||0}/${round(targets.sodium_mg_per_day,0)}mg`],
+      ["Protein",goalProgress(num(food.daily_avg.protein_g),num(targets.protein_g_per_day)),`${food.daily_avg.protein_g||0}/${round(targets.protein_g_per_day,0)}g`],
+      ["Fiber",goalProgress(num(food.daily_avg.fiber_g),num(targets.fiber_g_per_day)),`${food.daily_avg.fiber_g||0}/${round(targets.fiber_g_per_day,0)}g`],
+    ];
+    const foodScore=Math.round(foodMeters.reduce((sum,item)=>sum+item[1],0)/foodMeters.length)||0;
+    setFocusRing("meal",foodScore);
+    $("mealFocusSub").textContent=`${d.period?.label||"Selected period"} nutrition progress against your daily food targets.`;
+    $("mealFocusStats").innerHTML=[
+      [food.daily_avg.calories||0,"kcal/day"],
+      [`${food.daily_avg.sugar_g||0}g`,"sugar/day"],
+      [`${food.daily_avg.sodium_mg||0}mg`,"sodium/day"],
+      [`${food.daily_avg.protein_g||0}g`,"protein/day"],
+      [`${food.meal_count||0}`,"meals logged"],
+    ].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+    $("mealFocusBalance").innerHTML=foodMeters.slice(0,3).map(([label,value,detail])=>miniMeter(label,value,detail)).join("");
   }
-  if($("activityFocusMetrics")){
+  if($("activityFocusStats")){
     const stepTarget=num(targets.steps_per_day)*periodDays;
-    $("activityFocusMetrics").innerHTML=renderMetricGrid([
-      {value:`${movement.active_minutes||0}`,label:`active min of ${round(targets.activity_minutes_for_period||targets.activity_min_per_week,0)}`},
-      {value:`${movement.steps||0}`,label:`steps of ${round(stepTarget,0)}`},
-      {value:`${movement.calories_burned||0}`,label:`burn of ${round(num(targets.calories_burned_per_week)*periodDays/7,0)}`},
-      {value:movement.average_heartrate?`${movement.average_heartrate} bpm`:"-",label:"avg heart rate"},
-    ]);
-    $("activityFocusBalance").innerHTML=[
-      meter("Active minutes",goalProgress(num(movement.active_minutes),num(targets.activity_minutes_for_period||targets.activity_min_per_week)),`${movement.active_minutes||0}/${round(targets.activity_minutes_for_period||targets.activity_min_per_week,0)} min`),
-      meter("Steps",goalProgress(num(movement.steps),stepTarget),`${movement.steps||0}/${round(stepTarget,0)} steps`),
-      meter("Calories burned",goalProgress(num(movement.calories_burned),num(targets.calories_burned_per_week)*periodDays/7),`${movement.calories_burned||0}/${round(num(targets.calories_burned_per_week)*periodDays/7,0)} cal`),
-      meter("Distance",goalProgress(num(movement.distance_m),num(targets.distance_m_per_week)*periodDays/7),`${fmtDistance(movement.distance_m||0)} / ${fmtDistance(num(targets.distance_m_per_week)*periodDays/7)}`),
-    ].join("");
+    const burnTarget=num(targets.calories_burned_per_week)*periodDays/7;
+    const distanceTarget=num(targets.distance_m_per_week)*periodDays/7;
+    const movementMeters=[
+      ["Active min",goalProgress(num(movement.active_minutes),num(targets.activity_minutes_for_period||targets.activity_min_per_week)),`${movement.active_minutes||0}/${round(targets.activity_minutes_for_period||targets.activity_min_per_week,0)} min`],
+      ["Steps",goalProgress(num(movement.steps),stepTarget),`${movement.steps||0}/${round(stepTarget,0)} steps`],
+      ["Burn",goalProgress(num(movement.calories_burned),burnTarget),`${movement.calories_burned||0}/${round(burnTarget,0)} cal`],
+      ["Distance",goalProgress(num(movement.distance_m),distanceTarget),`${fmtDistance(movement.distance_m||0)} / ${fmtDistance(distanceTarget)}`],
+    ];
+    const movementScore=Math.round(movementMeters.reduce((sum,item)=>sum+item[1],0)/movementMeters.length)||0;
+    setFocusRing("activity",movementScore);
+    $("activityFocusSub").textContent=`${d.period?.label||"Selected period"} movement progress from workouts, steps and synced activity.`;
+    $("activityFocusStats").innerHTML=[
+      [movement.active_minutes||0,"active min"],
+      [movement.steps||0,"steps"],
+      [movement.workouts||0,"workouts"],
+      [movement.calories_burned||0,"cal burned"],
+      [movement.average_heartrate?`${movement.average_heartrate} bpm`:"-","avg heart rate"],
+    ].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+    $("activityFocusBalance").innerHTML=movementMeters.slice(0,3).map(([label,value,detail])=>miniMeter(label,value,detail)).join("");
   }
 };
 
@@ -276,6 +441,7 @@ async function loadDashboard(withInsight=false){
   try{
     $("periodWeek").classList.toggle("active",dashboardPeriod==="week");
     $("periodMonth").classList.toggle("active",dashboardPeriod==="month");
+    if($("periodDate")&&$("periodDate").value!==toIsoDate(dashboardAnchor))$("periodDate").value=toIsoDate(dashboardAnchor);
     const sp=new URLSearchParams({period:dashboardPeriod,anchor:toIsoDate(dashboardAnchor)});
     if(withInsight)sp.set("insight","true");
     const d=await api(`/api/dashboard?${sp.toString()}`);
@@ -284,7 +450,7 @@ async function loadDashboard(withInsight=false){
     animateNumber($("scoreNum"),d.score);$("scoreBand").textContent=d.band;
     $("periodLabel").textContent=d.period?.label||"Current period";
     $("dashboardTitle").textContent=dashboardPeriod==="month"?"Your month, decoded.":"Your week, decoded.";
-    $("dashboardSub").textContent=`${d.period.label}: food intake, movement and risk signals scored transparently.`;
+    $("dashboardSub").textContent=`${d.period?.label||"Selected period"}: food intake, movement and risk signals scored transparently.`;
     const ring=$("ringFg");
     ring.style.strokeDashoffset=540-(540*d.score)/100;
     ring.style.stroke=d.score>=60?"var(--lime)":d.score>=40?"var(--amber)":"var(--coral)";
@@ -340,19 +506,32 @@ async function loadDashboard(withInsight=false){
           {type:"line",label:"Active minutes",data:(d.trend||[]).map(t=>t.active_min),borderColor:"#8FBF10",backgroundColor:"#8FBF10",tension:.35,yAxisID:"y1"},
         ],
       },
-      options:{responsive:true,scales:{y:{position:"left"},y1:{position:"right",grid:{display:false}}}},
+      options:{
+        responsive:true,
+        plugins:{legend:{labels:{color:Chart.defaults.color}}},
+        scales:{
+          y:{position:"left",ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},
+          y1:{position:"right",ticks:{color:Chart.defaults.color},grid:{display:false}},
+          x:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},
+        },
+      },
     });
     if(d.insight){$("insightCard").hidden=false;$("insightText").textContent=d.insight_note?`${d.insight}\n\n${d.insight_note}`:d.insight;}
     _stravaConnected=!!d.strava_connected;
     $("stravaStatus").textContent=d.strava_connected?`Strava connected${d.strava_last_sync_at?" - last sync "+new Date(d.strava_last_sync_at).toLocaleString():""}`:"";
     $("btnStrava").textContent=d.strava_connected?"Re-sync Strava":"Connect Strava";
-  }catch(e){toast("Dashboard: "+e.message);}
+    return d;
+  }catch(e){toast("Dashboard: "+e.message);return null;}
 }
 
 $("periodWeek").addEventListener("click",()=>{dashboardPeriod="week";loadDashboard();});
 $("periodMonth").addEventListener("click",()=>{dashboardPeriod="month";loadDashboard();});
+$("periodDate").addEventListener("change",e=>{dashboardAnchor=parseIsoDate(e.target.value);loadDashboard();});
 $("prevPeriod").addEventListener("click",()=>{dashboardAnchor.setDate(dashboardAnchor.getDate()+(dashboardPeriod==="week"?-7:0));if(dashboardPeriod==="month")dashboardAnchor.setMonth(dashboardAnchor.getMonth()-1);loadDashboard();});
 $("nextPeriod").addEventListener("click",()=>{dashboardAnchor.setDate(dashboardAnchor.getDate()+(dashboardPeriod==="week"?7:0));if(dashboardPeriod==="month")dashboardAnchor.setMonth(dashboardAnchor.getMonth()+1);loadDashboard();});
+$("btnExportPdf").addEventListener("click",async()=>{const b=$("btnExportPdf");b.disabled=true;b.textContent="Exporting...";try{await exportDashboardPdf();}catch(e){toast("Export failed: "+e.message);}b.disabled=false;b.textContent="Export PDF";});
+$("themeToggle").addEventListener("click",()=>setTheme(document.body.dataset.theme==="dark"?"light":"dark"));
+$("brandHome").addEventListener("click",()=>{activateTab("dashboard");window.scrollTo({top:0,behavior:"smooth"});});
 
 $("btnInsight").addEventListener("click",async()=>{const b=$("btnInsight");b.disabled=true;b.textContent="Gemini is thinking...";await loadDashboard(true);b.disabled=false;b.textContent="Generate AI weekly insight";});
 $("btnSeed").addEventListener("click",async()=>{
@@ -660,6 +839,7 @@ $("btnChat").addEventListener("click",sendChat);
 $("chatMsg").addEventListener("keydown",e=>e.key==="Enter"&&sendChat());
 
 let wardA,wardR;
-async function loadCommunity(){const c=await api("/api/community");$("communityStats").innerHTML=[[c.platform_users,"active users"],[c.median_weekly_active_min+" min","median weekly activity"],[c.median_daily_sodium_mg+" mg","median daily sodium"],[c.median_daily_sugar_g+" g","median daily sugar"]].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");$("communityNote").textContent=c.note;const labels=c.wards.map(w=>w.ward);wardA?.destroy();wardR?.destroy();wardA=new Chart($("wardActive"),{type:"bar",data:{labels,datasets:[{label:"min/week",data:c.wards.map(w=>w.avg_active_min),backgroundColor:"#0E3B2E",borderRadius:6}]},options:{plugins:{legend:{display:false}}}});wardR=new Chart($("wardRisk"),{type:"bar",data:{labels,datasets:[{label:"%",data:c.wards.map(w=>w.elevated_risk_pct),backgroundColor:"#D95245",borderRadius:6}]},options:{plugins:{legend:{display:false}}}});}
+async function loadCommunity(){const c=await api("/api/community");$("communityStats").innerHTML=[[c.platform_users,"active users"],[c.median_weekly_active_min+" min","median weekly activity"],[c.median_daily_sodium_mg+" mg","median daily sodium"],[c.median_daily_sugar_g+" g","median daily sugar"]].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");$("communityNote").textContent=c.note;const labels=c.wards.map(w=>w.ward);wardA?.destroy();wardR?.destroy();wardA=new Chart($("wardActive"),{type:"bar",data:{labels,datasets:[{label:"min/week",data:c.wards.map(w=>w.avg_active_min),backgroundColor:"#0E3B2E",borderRadius:6}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},y:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}}}}});wardR=new Chart($("wardRisk"),{type:"bar",data:{labels,datasets:[{label:"%",data:c.wards.map(w=>w.elevated_risk_pct),backgroundColor:"#D95245",borderRadius:6}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}},y:{ticks:{color:Chart.defaults.color},grid:{color:Chart.defaults.borderColor}}}}});}
 
+initTheme();
 initAuth();
