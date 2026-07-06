@@ -99,6 +99,31 @@ const setAuthError=message=>{
 const setAuthBusy=busy=>{
   ["btnGoogleAuth","btnEmailSignIn","btnEmailSignUp"].forEach(id=>{const el=$(id);if(el)el.disabled=busy;});
 };
+const formatAuthError=error=>{
+  const code=String(error?.code||"");
+  const raw=String(error?.message||error||"");
+  const text=`${code} ${raw}`.toLowerCase();
+  if(text.includes("api-key-not-valid")||text.includes("invalid api key")){
+    return "Firebase rejected the API key. Recheck FIREBASE_API_KEY in Cloud Run and redeploy with the Firebase Web app config.";
+  }
+  if(text.includes("unauthorized-domain")){
+    return "This domain is not authorized in Firebase. Add this Cloud Run domain under Firebase Authentication authorized domains.";
+  }
+  if(text.includes("operation-not-allowed")){
+    return "This sign-in method is not enabled in Firebase Authentication. Enable Google and Email/Password providers.";
+  }
+  if(text.includes("popup-closed-by-user"))return "Google sign-in was closed before it finished.";
+  if(text.includes("popup-blocked"))return "The browser blocked the Google sign-in popup. Allow popups for this site and try again.";
+  if(text.includes("invalid-email"))return "Enter a valid email address.";
+  if(text.includes("weak-password"))return "Use a password with at least 6 characters.";
+  if(text.includes("email-already-in-use"))return "That email is already registered. Use Sign in instead.";
+  if(text.includes("user-not-found")||text.includes("wrong-password")||text.includes("invalid-credential")){
+    return "Email or password is incorrect.";
+  }
+  if(text.includes("network-request-failed"))return "Authentication network request failed. Check your connection and try again.";
+  if(text.includes("missing authorization header"))return "Sign in again so VitalLens can attach your secure session token.";
+  return raw||"Authentication failed.";
+};
 const startGuestSession=()=>{
   _authMode="demo";
   const id=localId();
@@ -159,7 +184,7 @@ async function initAuth(){
       _isAdmin=!!session.is_admin;
       showApp();
     }catch(e){
-      setAuthError(e.message);
+      setAuthError(formatAuthError(e));
       await _authClient.signOut();
     }
   });
@@ -234,7 +259,7 @@ const authEmailPassword=async mode=>{
       await _authClient.signInWithEmailAndPassword(email,password);
     }
   }catch(e){
-    setAuthError(e.message||"Authentication failed.");
+    setAuthError(formatAuthError(e));
   }finally{
     setAuthBusy(false);
   }
@@ -247,7 +272,7 @@ const authGoogle=async()=>{
     provider.setCustomParameters({prompt:"select_account"});
     await _authClient.signInWithPopup(provider);
   }catch(e){
-    setAuthError(e.message||"Google sign-in failed.");
+    setAuthError(formatAuthError(e));
   }finally{
     setAuthBusy(false);
   }

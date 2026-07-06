@@ -14,22 +14,45 @@
 <body>
 <section id="authShell" class="auth-shell">
   <div class="auth-card">
-    <div class="auth-brand">
-      <span class="lens"></span>
-      <div>
-        <h1>VitalLens</h1>
-        <p>Lifestyle signals for better everyday health.</p>
+    <div class="auth-intro">
+      <div class="auth-brand">
+        <span class="lens"></span>
+        <div>
+          <h1>VitalLens</h1>
+          <p>Lifestyle signals for better everyday health.</p>
+        </div>
+      </div>
+      <div class="auth-copy">
+        <h2>Read your food and movement patterns with clarity.</h2>
+        <p>Track meals, activity, targets, and risk signals in one focused health dashboard.</p>
+      </div>
+      <div class="auth-highlights" aria-label="VitalLens highlights">
+        <span>Meal intelligence</span>
+        <span>Movement trends</span>
+        <span>Personal targets</span>
       </div>
     </div>
-    <button class="btn primary" id="btnGoogleAuth" type="button">Continue with Google</button>
-    <div class="auth-divider"><span>Email access</span></div>
-    <label>Email <input type="email" id="authEmail" autocomplete="email" placeholder="you@example.com"/></label>
-    <label>Password <input type="password" id="authPassword" autocomplete="current-password" placeholder="At least 6 characters"/></label>
-    <div class="auth-actions">
-      <button class="btn primary" id="btnEmailSignIn" type="button">Sign in</button>
-      <button class="btn ghost auth-secondary" id="btnEmailSignUp" type="button">Sign up</button>
+    <div class="auth-panel">
+      <button class="google-auth-btn" id="btnGoogleAuth" type="button">
+        <svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+          <path fill="#EA4335" d="M24 9.5c3.6 0 6.8 1.2 9.3 3.6l6.5-6.5C35.8 2.8 30.5.5 24 .5 14.7.5 6.8 5.8 2.9 13.6l7.7 6C12.4 13.7 17.7 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.6 24.5c0-1.6-.1-3.1-.4-4.5H24v8.6h12.7c-.6 2.9-2.2 5.4-4.7 7.1l7.3 5.7c4.3-4 7.3-9.8 7.3-16.9z"/>
+          <path fill="#FBBC05" d="M10.6 28.4c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.7-6C1.3 16.2.4 19.8.4 23.7s.9 7.5 2.5 10.7l7.7-6z"/>
+          <path fill="#34A853" d="M24 47c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.3-4.7 2.2-8.6 2.2-6.3 0-11.6-4.2-13.4-9.9l-7.7 6C6.8 41.6 14.7 47 24 47z"/>
+        </svg>
+        <span>Continue with Google</span>
+      </button>
+      <div class="auth-divider"><span>Email access</span></div>
+      <div class="auth-fields">
+        <label for="authEmail"><span>Email</span><input type="email" id="authEmail" autocomplete="email" placeholder="you@example.com"/></label>
+        <label for="authPassword"><span>Password</span><input type="password" id="authPassword" autocomplete="current-password" placeholder="At least 6 characters"/></label>
+      </div>
+      <div class="auth-actions">
+        <button class="btn primary" id="btnEmailSignIn" type="button">Sign in</button>
+        <button class="btn ghost auth-secondary" id="btnEmailSignUp" type="button">Sign up</button>
+      </div>
+      <p class="auth-error" id="authError" aria-live="polite"></p>
     </div>
-    <p class="auth-error" id="authError"></p>
   </div>
 </section>
 <div id="appShell" hidden>
