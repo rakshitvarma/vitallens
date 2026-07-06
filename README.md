@@ -45,29 +45,17 @@ gcloud run services update vitallens --region asia-south1 \
   --update-env-vars PUBLIC_BASE_URL=https://YOUR-SERVICE-URL.run.app
 ```
 
-## Google sign-in
+## Sign-in
 
-The app uses Google Identity Services directly. There is no Supabase auth layer.
+Sign-in is disabled for the hackathon demo. The browser creates a local demo user
+id and sends it as `X-User-Id` on API calls.
 
-```bash
-gcloud run services update vitallens --region asia-south1 \
-  --update-env-vars GOOGLE_CLIENT_ID=YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com
-```
-
-If the service previously had Supabase auth variables, remove them:
+If the service previously had Google or Supabase auth variables, remove them:
 
 ```bash
 gcloud run services update vitallens --region asia-south1 \
-  --remove-env-vars AUTH_PROVIDER,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_JWT_SECRET,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY
+  --remove-env-vars GOOGLE_CLIENT_ID,GOOGLE_OAUTH_CLIENT_ID,VITE_GOOGLE_CLIENT_ID,NEXT_PUBLIC_GOOGLE_CLIENT_ID,AUTH_PROVIDER,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_JWT_SECRET,VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY
 ```
-
-In the Google Cloud Console OAuth client, add:
-
-- Authorized JavaScript origin: `https://YOUR-SERVICE-URL.run.app`
-
-The browser receives a Google ID token and the API verifies it server-side against
-`GOOGLE_CLIENT_ID`. The user id stored in Firestore/local JSON is `google:<sub>`,
-where `sub` is Google's stable account identifier.
 
 ## Strava activity sync
 

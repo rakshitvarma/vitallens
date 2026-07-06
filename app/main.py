@@ -11,7 +11,6 @@ from app.auth import (
     AUTH_CONFIG_ERROR,
     AUTH_CONFIGURED,
     AUTH_PROVIDER,
-    GOOGLE_CLIENT_ID,
     get_user_id,
 )
 
@@ -29,7 +28,6 @@ def health(): return {"ok": True}
 def config():
     return {
         "auth_provider": AUTH_PROVIDER,
-        "google_client_id": GOOGLE_CLIENT_ID if AUTH_CONFIGURED else "",
         "strava_enabled": bool(STRAVA_ID),
         "auth_enabled": AUTH_CONFIGURED,
         "auth_error": AUTH_CONFIG_ERROR,

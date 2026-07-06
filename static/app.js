@@ -1,37 +1,7 @@
 /* VitalLens SPA */
-let _user=null,_token=null;
+let _user=null;
 let _stravaConnected=false;
 
-const cleanAuthUrl=()=>{
-  const params=new URLSearchParams(location.search);
-  const before=params.toString();
-  ["error","error_description","error_code"].forEach(k=>params.delete(k));
-  const after=params.toString();
-  if(location.hash||before!==after) window.history.replaceState({},"","/"+(after?`?${after}`:""));
-};
-
-const showAuthScreen=(message="")=>{
-  document.getElementById("authScreen").hidden=false;
-  document.getElementById("appShell").hidden=true;
-  const errorEl=document.getElementById("authError");
-  if(errorEl){
-    errorEl.textContent=message;
-    errorEl.hidden=!message;
-  }
-};
-
-const storageGet=(key)=>{
-  try{return sessionStorage.getItem(key);}
-  catch{return null;}
-};
-const storageSet=(key,value)=>{
-  try{sessionStorage.setItem(key,value);}
-  catch{}
-};
-const storageRemove=(key)=>{
-  try{sessionStorage.removeItem(key);}
-  catch{}
-};
 const localId=()=>{
   try{
     const existing=localStorage.getItem("vl_uid");
@@ -46,17 +16,8 @@ const localId=()=>{
 
 const startGuestSession=()=>{
   const id=localId();
-  _token=null;
   _user={id,email:"dev@local",user_metadata:{full_name:"Demo User",avatar_url:""}};
   showApp();
-};
-
-const clearGoogleSession=()=>{
-  _token=null;
-  _user=null;
-  storageRemove("vl_google_token");
-  storageRemove("vl_google_user");
-  window.google?.accounts?.id?.disableAutoSelect();
 };
 
 const handleReturnParams=()=>{
@@ -70,113 +31,26 @@ const handleReturnParams=()=>{
   }
 };
 
-const parseJwtPayload=(token)=>{
-  const base64Url=(token.split(".")[1]||"").replace(/-/g,"+").replace(/_/g,"/");
-  const padded=base64Url+"=".repeat((4-base64Url.length%4)%4);
-  const bytes=Uint8Array.from(atob(padded),c=>c.charCodeAt(0));
-  return JSON.parse(new TextDecoder().decode(bytes));
-};
-const isJwtExpired=(token)=>{
-  try{return ((parseJwtPayload(token).exp||0)*1000)<Date.now()+60000;}
-  catch{return true;}
-};
-
-const waitForGoogle=()=>new Promise(resolve=>{
-  if(window.google?.accounts?.id) return resolve(true);
-  let attempts=0;
-  const timer=setInterval(()=>{
-    if(window.google?.accounts?.id){clearInterval(timer);resolve(true);}
-    else if(++attempts>50){clearInterval(timer);resolve(false);}
-  },100);
-});
-
-async function initGoogleAuth(clientId){
-  const savedToken=storageGet("vl_google_token");
-  const savedUser=storageGet("vl_google_user");
-  if(savedToken&&savedUser&&!isJwtExpired(savedToken)){
-    _token="google:"+savedToken;
-    _user=JSON.parse(savedUser);
-    showApp();
-    return;
-  }
-  clearGoogleSession();
-  showAuthScreen();
-  const host=document.getElementById("googleButton");
-  host.hidden=false;
-  host.innerHTML="";
-  if(!(await waitForGoogle())){
-    showAuthScreen("Google sign-in client failed to load. Check the network and refresh.");
-    return;
-  }
-  window.google.accounts.id.initialize({
-    client_id:clientId,
-    callback:response=>{
-      if(!response.credential){
-        showAuthScreen("Google did not return a sign-in credential.");
-        return;
-      }
-      const claims=parseJwtPayload(response.credential);
-      _token=response.credential;
-      _user={
-        id:"google:"+claims.sub,
-        email:claims.email,
-        user_metadata:{full_name:claims.name||claims.email||"User",avatar_url:claims.picture||""}
-      };
-      storageSet("vl_google_token",response.credential);
-      storageSet("vl_google_user",JSON.stringify(_user));
-      cleanAuthUrl();
-      showApp();
-    },
-    ux_mode:"popup",
-    use_fedcm_for_prompt:true
-  });
-  window.google.accounts.id.renderButton(host,{theme:"outline",size:"large",text:"continue_with",shape:"pill",width:320});
-}
-
 async function initAuth(){
-  let cfg={};
-  try{ cfg=await fetch("/api/config").then(r=>r.json()); }
-  catch(e){
-    showAuthScreen("Could not load app configuration. Please refresh and try again.");
-    return;
-  }
-  if(!cfg.auth_enabled){
-    startGuestSession();
-    return;
-  }
-  if(!cfg.google_client_id){
-    showAuthScreen(cfg.auth_error||"Google sign-in is not configured.");
-    return;
-  }
-  await initGoogleAuth(cfg.google_client_id);
+  startGuestSession();
 }
 
 function showApp(){
-  document.getElementById("authScreen").hidden=true;
   document.getElementById("appShell").hidden=false;
   const u=_user;
   document.getElementById("userName").textContent=u.user_metadata?.full_name||u.email||"User";
   const av=document.getElementById("userAvatar");
   if(u.user_metadata?.avatar_url){av.src=u.user_metadata.avatar_url;av.hidden=false;}
-  document.getElementById("btnSignOut").onclick=async()=>{
-    clearGoogleSession();
-    location.reload();
-  };
   loadDashboard();
   handleReturnParams();
 }
 
 const api=async(path,opts={})=>{
   const headers={...(opts.headers||{})};
-  if(_token) headers["Authorization"]="Bearer "+_token;
-  else headers["X-User-Id"]=_user?.id||"dev";
+  headers["X-User-Id"]=_user?.id||"demo";
   const r=await fetch(path,{...opts,headers});
   if(!r.ok){
     const message=(await r.json().catch(()=>({}))).detail||r.statusText;
-    if(r.status===401&&_token){
-      clearGoogleSession();
-      showAuthScreen(message);
-    }
     throw new Error(message);
   }
   return r.json();

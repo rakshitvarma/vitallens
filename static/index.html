@@ -7,20 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="stylesheet" href="/static/style.css"/>
 </head>
 <body>
-<div id="authScreen" class="auth-screen" hidden>
-  <div class="auth-card">
-    <div class="auth-brand"><span class="lens"></span>VitalLens</div>
-    <h1>Your week, decoded.</h1>
-    <p>Snap meals. Track activity. Get explainable AI health signals.</p>
-    <div class="google-button-host" id="googleButton"></div>
-    <p class="auth-error" id="authError" hidden></p>
-    <p class="auth-note">Lifestyle signals, not medical diagnosis.</p>
-  </div>
-</div>
 <div id="appShell" hidden>
 <header class="topbar">
   <div class="brand"><span class="lens"></span>VitalLens</div>
@@ -34,7 +23,6 @@
   <div class="user-info">
     <img id="userAvatar" class="avatar" src="" alt="" hidden/>
     <span id="userName"></span>
-    <button class="btn-link" id="btnSignOut">Sign out</button>
   </div>
 </header>
 <main>
