@@ -1,4 +1,4 @@
-import base64, calendar, hashlib, hmac, json, os, random, statistics
+import base64, calendar, hashlib, hmac, json, os, random, secrets
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 
@@ -756,7 +756,334 @@ def chat(body: ChatIn, user_id: str=Depends(get_user_id)):
     return {"reply": reply}
 
 
-WARDS=["Saket","Dwarka","Rohini","Lajpat Nagar","Karol Bagh","Vasant Kunj"]
+COMMUNITY_KINDS = {"friends": "Friends", "family": "Family", "wellness": "Wellness circle"}
+COMMUNITY_EMOJI_FALLBACK = "🌿"
+
+
+class CommunityGroupIn(BaseModel):
+    name: str
+    kind: str = "friends"
+    emoji: str = COMMUNITY_EMOJI_FALLBACK
+
+
+class CommunityJoinIn(BaseModel):
+    token: str
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _community_member_id(group_id: str, user_id: str) -> str:
+    return hashlib.sha256(f"{group_id}:{user_id}".encode()).hexdigest()
+
+
+def _clean_group_kind(kind: str) -> tuple[str, str]:
+    key = str(kind or "friends").strip().lower().replace(" ", "_")
+    if key in ("wellness_circle", "wellness-circle"):
+        key = "wellness"
+    if key not in COMMUNITY_KINDS:
+        key = "friends"
+    return key, COMMUNITY_KINDS[key]
+
+
+def _clean_emoji(value: str) -> str:
+    emoji = str(value or COMMUNITY_EMOJI_FALLBACK).strip()
+    return emoji[:4] or COMMUNITY_EMOJI_FALLBACK
+
+
+def _current_member_profile(current_user: dict) -> dict:
+    email = str(current_user.get("email") or "").strip()
+    name = str(current_user.get("name") or "").strip() or (email.split("@")[0] if email else "Member")
+    return {"display_name": name[:80], "email": email[:120]}
+
+
+def _group_by_id(group_id: str) -> dict | None:
+    return next((g for g in storage.all_docs("community_groups") if g.get("id") == group_id), None)
+
+
+def _group_by_token(token: str) -> dict | None:
+    clean = str(token or "").strip()
+    if not clean:
+        return None
+    return next((g for g in storage.all_docs("community_groups") if g.get("invite_enabled") and g.get("invite_token") == clean), None)
+
+
+def _members_for_group(group_id: str) -> list[dict]:
+    return [m for m in storage.all_docs("community_members") if m.get("group_id") == group_id]
+
+
+def _membership(group_id: str, user_id: str) -> dict | None:
+    member_id = _community_member_id(group_id, user_id)
+    return next((m for m in storage.all_docs("community_members") if m.get("id") == member_id), None)
+
+
+def _public_group(group: dict, member: dict | None = None, member_count: int | None = None) -> dict:
+    return {
+        "id": group.get("id"),
+        "name": group.get("name", "Community group"),
+        "kind": group.get("kind", "friends"),
+        "kind_label": group.get("kind_label", "Friends"),
+        "emoji": group.get("emoji") or COMMUNITY_EMOJI_FALLBACK,
+        "owner_id": group.get("owner_id", ""),
+        "member_count": member_count if member_count is not None else len(_members_for_group(group.get("id", ""))),
+        "role": (member or {}).get("role", "member"),
+        "joined_at": (member or {}).get("joined_at", ""),
+        "updated_at": group.get("updated_at", group.get("created_at", "")),
+        "created_at": group.get("created_at", ""),
+        "invite_enabled": bool(group.get("invite_enabled")),
+        "invite_token": group.get("invite_token", "") if (member or {}).get("role") == "owner" else "",
+    }
+
+
+def _require_group_member(group_id: str, user_id: str) -> tuple[dict, dict]:
+    group = _group_by_id(group_id)
+    if not group:
+        raise HTTPException(404, "Community group not found")
+    member = _membership(group_id, user_id)
+    if not member:
+        raise HTTPException(403, "Join this group before viewing it")
+    return group, member
+
+
+def _require_group_owner(group_id: str, user_id: str) -> tuple[dict, dict]:
+    group, member = _require_group_member(group_id, user_id)
+    if member.get("role") != "owner":
+        raise HTTPException(403, "Only group owners can do that")
+    return group, member
+
+
+def _save_member(group_id: str, user_id: str, role: str, profile: dict, joined_at: str | None = None) -> dict:
+    member = {
+        "id": _community_member_id(group_id, user_id),
+        "group_id": group_id,
+        "user_id": user_id,
+        "role": role,
+        "display_name": profile.get("display_name", "Member"),
+        "email": profile.get("email", ""),
+        "joined_at": joined_at or _now_iso(),
+    }
+    storage.save_doc("community_members", member)
+    return member
+
+
+def _average(values: list[float | int | None]) -> int:
+    clean = [float(v) for v in values if v is not None]
+    return round(sum(clean) / len(clean)) if clean else 0
+
+
+def _community_badges(score: dict, food_score: int, movement_score: int, summary: dict, targets: dict) -> list[str]:
+    badges = []
+    if score.get("score", 0) >= 80:
+        badges.append("Group pace-setter")
+    if food_score >= 78:
+        badges.append("Balanced Plate")
+    if movement_score >= 78:
+        badges.append("Move Streak")
+    if summary.get("sugar_g", 0) and summary.get("sugar_g", 0) <= targets.get("sugar_g_per_day", 50) * 0.9:
+        badges.append("Low Sugar Week")
+    if summary.get("days_logged", 0) >= min(targets.get("period_days", 7), 5):
+        badges.append("Consistency")
+    return badges[:3] or ["Fresh Start"]
+
+
+def _community_report_row(member: dict, start: date, end: date) -> dict:
+    uid = member.get("user_id", "")
+    targets = _user_targets(uid)
+    meals = storage.query_docs("meals", user_id=uid)
+    acts = storage.query_docs("activities", user_id=uid)
+    analytics = _analytics(meals, acts, start, end)
+    score = scoring.compute_score(analytics["meals"], analytics["activities"], targets=targets, start_date=start, end_date=end)
+    components = score.get("components", {})
+    summary = analytics["summary"]
+    movement = analytics["movement"]
+    food_score = _average([
+        components.get("calories"),
+        components.get("sugar"),
+        components.get("sodium"),
+        components.get("protein"),
+        components.get("consistency"),
+    ])
+    period_days = max((end - start).days + 1, 1)
+    step_target = targets.get("steps_per_day", DEFAULT_USER_TARGETS["steps_per_day"]) * period_days
+    burn_target = targets.get("calories_burned_per_week", DEFAULT_USER_TARGETS["calories_burned_per_week"]) * period_days / 7
+    workout_target = max(1, round(3 * period_days / 7))
+    movement_parts = [components.get("activity"), components.get("consistency")]
+    if movement.get("steps"):
+        movement_parts.append(min(100, round(_float(movement.get("steps")) / step_target * 100)) if step_target else 0)
+    if movement.get("calories_burned"):
+        movement_parts.append(min(100, round(_float(movement.get("calories_burned")) / burn_target * 100)) if burn_target else 0)
+    if movement.get("workouts"):
+        movement_parts.append(min(100, round(_float(movement.get("workouts")) / workout_target * 100)))
+    movement_score = _average(movement_parts)
+    display_name = member.get("display_name") or (member.get("email", "").split("@")[0] if member.get("email") else "Member")
+    row_summary = {
+        "calories": summary.get("calories", 0),
+        "sugar_g": summary.get("sugar_g", 0),
+        "sodium_mg": summary.get("sodium_mg", 0),
+        "protein_g": summary.get("protein_g", 0),
+        "active_minutes": summary.get("active_minutes", 0),
+        "workouts": summary.get("workouts", 0),
+        "steps": summary.get("steps", 0),
+        "calories_burned": summary.get("calories_burned", 0),
+        "days_logged": summary.get("days_logged", 0),
+        "meal_count": summary.get("meal_count", 0),
+    }
+    score_targets = {**targets, **score.get("targets", {})}
+    return {
+        "user_id": uid,
+        "display_name": display_name,
+        "email": member.get("email", ""),
+        "role": member.get("role", "member"),
+        "overall_score": score.get("score", 0),
+        "food_score": food_score,
+        "movement_score": movement_score,
+        "band": score.get("band", ""),
+        "summary": row_summary,
+        "badges": _community_badges(score, food_score, movement_score, row_summary, score_targets),
+    }
+
+
+def _community_comparison(rows: list[dict], user_id: str) -> list[dict]:
+    current = next((r for r in rows if r.get("user_id") == user_id), None)
+    if not current:
+        return []
+    metrics = [
+        ("calories", "Calories/day", "kcal", "neutral"),
+        ("sugar_g", "Sugar/day", "g", "lower"),
+        ("sodium_mg", "Sodium/day", "mg", "lower"),
+        ("active_minutes", "Active minutes", "min", "higher"),
+        ("workouts", "Workouts", "", "higher"),
+        ("steps", "Steps", "", "higher"),
+        ("calories_burned", "Calories burned", "cal", "higher"),
+    ]
+    comparison = []
+    for key, label, unit, direction in metrics:
+        values = [_float(r.get("summary", {}).get(key)) for r in rows]
+        group_avg = round(sum(values) / len(values), 1) if values else 0
+        you = _float(current.get("summary", {}).get(key))
+        delta = round(you - group_avg, 1)
+        if direction == "neutral":
+            status = "close to group average" if group_avg and abs(delta) <= max(group_avg * 0.12, 1) else "above group average" if delta > 0 else "below group average"
+        else:
+            improved = delta < 0 if direction == "lower" else delta > 0
+            status = "ahead of group average" if improved else "room to catch up" if delta else "matches group average"
+        comparison.append({"key": key, "label": label, "unit": unit, "you": round(you, 1), "group_average": group_avg, "delta": delta, "status": status})
+    return comparison
+
+
+@app.get("/api/community/groups")
+def list_community_groups(current_user: dict=Depends(get_current_user)):
+    user_id = current_user["uid"]
+    memberships = storage.query_docs("community_members", user_id=user_id)
+    groups = []
+    for member in memberships:
+        group = _group_by_id(member.get("group_id", ""))
+        if group:
+            groups.append(_public_group(group, member, len(_members_for_group(group["id"]))))
+    groups.sort(key=lambda g: g.get("updated_at") or g.get("created_at") or "", reverse=True)
+    return {"groups": groups}
+
+
+@app.post("/api/community/groups")
+def create_community_group(body: CommunityGroupIn, current_user: dict=Depends(get_current_user)):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Name your group first")
+    kind, kind_label = _clean_group_kind(body.kind)
+    now = _now_iso()
+    group = {
+        "id": secrets.token_hex(12),
+        "name": name[:80],
+        "kind": kind,
+        "kind_label": kind_label,
+        "emoji": _clean_emoji(body.emoji),
+        "owner_id": current_user["uid"],
+        "invite_token": secrets.token_urlsafe(18),
+        "invite_enabled": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+    storage.save_doc("community_groups", group)
+    member = _save_member(group["id"], current_user["uid"], "owner", _current_member_profile(current_user), now)
+    return {"group": _public_group(group, member, 1)}
+
+
+@app.post("/api/community/groups/{group_id}/invite")
+def regenerate_group_invite(group_id: str, current_user: dict=Depends(get_current_user)):
+    group, member = _require_group_owner(group_id, current_user["uid"])
+    group = {**group, "invite_token": secrets.token_urlsafe(18), "invite_enabled": True, "updated_at": _now_iso()}
+    storage.save_doc("community_groups", group)
+    return {"token": group["invite_token"], "group": _public_group(group, member, len(_members_for_group(group_id)))}
+
+
+@app.post("/api/community/join")
+def join_community_group(body: CommunityJoinIn, current_user: dict=Depends(get_current_user)):
+    group = _group_by_token(body.token)
+    if not group:
+        raise HTTPException(404, "Invite link is invalid or expired")
+    existing = _membership(group["id"], current_user["uid"])
+    joined = False
+    if existing:
+        member = existing
+    else:
+        member = _save_member(group["id"], current_user["uid"], "member", _current_member_profile(current_user))
+        joined = True
+    return {"joined": joined, "group": _public_group(group, member, len(_members_for_group(group["id"])))}
+
+
+@app.post("/api/community/groups/{group_id}/leave")
+def leave_community_group(group_id: str, current_user: dict=Depends(get_current_user)):
+    _, member = _require_group_member(group_id, current_user["uid"])
+    members = _members_for_group(group_id)
+    owners = [m for m in members if m.get("role") == "owner"]
+    if member.get("role") == "owner" and len(owners) <= 1:
+        raise HTTPException(409, "Add another owner before leaving this group")
+    storage.delete_doc("community_members", member["id"])
+    return {"ok": True}
+
+
+@app.get("/api/community/groups/{group_id}/report")
+def community_group_report(
+    group_id: str,
+    period: str="week",
+    anchor: str|None=None,
+    sort: str="overall",
+    current_user: dict=Depends(get_current_user),
+):
+    group, member = _require_group_member(group_id, current_user["uid"])
+    period, start, end = _period_bounds(period, anchor)
+    rows = [_community_report_row(m, start, end) for m in _members_for_group(group_id)]
+    sort_key = {"food": "food_score", "movement": "movement_score"}.get(sort, "overall_score")
+    rows.sort(key=lambda r: (r.get(sort_key, 0), r.get("overall_score", 0), r.get("display_name", "")), reverse=True)
+    for idx, row in enumerate(rows, start=1):
+        row["rank"] = idx
+        row["is_current_user"] = row.get("user_id") == current_user["uid"]
+    return {
+        "group": _public_group(group, member, len(rows)),
+        "period": {
+            "mode": period,
+            "start": _iso(start),
+            "end": _iso(end),
+            "label": f"{start.strftime('%b %d')} - {end.strftime('%b %d, %Y')}" if period == "week" else start.strftime("%B %Y"),
+            "days": max((end-start).days+1,1),
+        },
+        "sort": sort_key.replace("_score", ""),
+        "leaderboard": rows,
+        "comparison": _community_comparison(rows, current_user["uid"]),
+        "members": [
+            {
+                "user_id": m.get("user_id", ""),
+                "display_name": m.get("display_name") or (m.get("email", "").split("@")[0] if m.get("email") else "Member"),
+                "email": m.get("email", ""),
+                "role": m.get("role", "member"),
+                "joined_at": m.get("joined_at", ""),
+            }
+            for m in sorted(_members_for_group(group_id), key=lambda item: item.get("joined_at", ""))
+        ],
+    }
+
+
 DEMO_SCENARIOS=[
     {
         "key":"thriving",
@@ -813,22 +1140,6 @@ LEGACY_DEMO_MEAL_NAMES={
     "Chole bhature",
 }
 DEMO_MEAL_NAMES={name for scenario in DEMO_SCENARIOS for name, *_ in scenario["meals"]}|LEGACY_DEMO_MEAL_NAMES
-
-
-@app.get("/api/community")
-def community():
-    meals=storage.all_docs("meals"); acts=storage.all_docs("activities")
-    users={m.get("user_id") for m in meals}|{a.get("user_id") for a in acts}
-    sod,sug,act=[],[],[]
-    for u in users:
-        um=[m for m in meals if m.get("user_id")==u]; ua=[a for a in acts if a.get("user_id")==u]
-        days=max(len({str(m.get("date"))[:10] for m in um}),1)
-        if um: sod.append(sum(float(m.get("sodium_mg") or 0) for m in um)/days); sug.append(sum(float(m.get("sugar_g") or 0) for m in um)/days)
-        act.append(sum(float(a.get("minutes") or 0) for a in ua))
-    med=lambda xs,fb: round(statistics.median(xs)) if xs else fb
-    rng=random.Random(42)
-    wards=[{"ward":w,"avg_active_min":rng.randint(60,190),"avg_sodium_mg":rng.randint(1700,3400),"elevated_risk_pct":rng.randint(12,41)} for w in WARDS]
-    return {"platform_users":len(users),"median_daily_sodium_mg":med(sod,2450),"median_daily_sugar_g":med(sug,58),"median_weekly_active_min":med(act,95),"wards":wards,"note":"Ward figures are illustrative demo data."}
 
 
 @app.post("/api/demo/seed")
