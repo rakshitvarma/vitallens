@@ -67,14 +67,20 @@ const setTheme=theme=>{
   const selected=theme==="dark"?"dark":"light";
   document.body.dataset.theme=selected;
   localStorage.setItem(THEME_KEY,selected);
-  const btn=$("themeToggle");
-  if(btn){
+  ["themeToggle","authThemeToggle"].forEach(id=>{
+    const btn=$(id);
+    if(!btn)return;
     btn.textContent=selected==="dark"?"Light":"Dark";
     btn.setAttribute("aria-label",selected==="dark"?"Switch to light mode":"Switch to dark mode");
-  }
+  });
   applyChartTheme();
 };
 const initTheme=()=>{
+  const requested=new URLSearchParams(location.search).get("theme");
+  if(requested==="light"||requested==="dark"){
+    setTheme(requested);
+    return;
+  }
   const saved=localStorage.getItem(THEME_KEY);
   const prefersDark=window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   setTheme(saved||(prefersDark?"dark":"light"));
@@ -280,6 +286,7 @@ const authGoogle=async()=>{
 $("btnGoogleAuth").addEventListener("click",authGoogle);
 $("btnEmailSignIn").addEventListener("click",()=>authEmailPassword("signin"));
 $("btnEmailSignUp").addEventListener("click",()=>authEmailPassword("signup"));
+$("authThemeToggle")?.addEventListener("click",()=>setTheme(document.body.dataset.theme==="dark"?"light":"dark"));
 $("btnSignOut").addEventListener("click",async()=>{
   if(_authMode==="demo"){location.reload();return;}
   await _authClient?.signOut();
